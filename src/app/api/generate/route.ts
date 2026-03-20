@@ -14,11 +14,11 @@ interface GenerateRequest {
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: "OPENAI_API_KEY is not set" },
-        { status: 500 }
+        { error: "DEEPSEEK_API_KEY is not set" },
+        { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
       );
     }
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     if (!productName || !features) {
       return NextResponse.json(
         { error: "Product name and features are required" },
-        { status: 400 }
+        { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
       );
     }
 
@@ -75,15 +75,15 @@ Please output in the following JSON format:
   "description": "..."
 }`;
 
-    // Use OpenAI API directly via fetch (works better with edge runtime)
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Use DeepSeek API (OpenAI-compatible)
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: "deepseek-chat",
         messages: [
           {
             role: "system",
@@ -101,7 +101,7 @@ Please output in the following JSON format:
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error?.message || "OpenAI API error");
+      throw new Error(errorData.error?.message || "DeepSeek API error");
     }
 
     const data = await response.json();
@@ -130,14 +130,14 @@ Please output in the following JSON format:
         bulletPoints,
         description: parsedResult.description
       }
-    });
+    }, { headers: { "Access-Control-Allow-Origin": "*" } });
 
   } catch (error) {
     console.error("Generation error:", error);
 
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to generate content" },
-      { status: 500 }
+      { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
 }

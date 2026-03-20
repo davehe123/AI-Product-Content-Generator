@@ -37,20 +37,30 @@ export default function Home() {
     setResult(null);
 
     try {
+      console.log("Submitting form data:", formData);
+      
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
 
+      console.log("Response status:", response.status);
+      
       const data = await response.json();
+      console.log("Response data:", data);
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to generate content");
+        throw new Error(data.error || `Failed to generate (${response.status})`);
+      }
+
+      if (!data.data) {
+        throw new Error("No data returned from API");
       }
 
       setResult(data.data);
     } catch (err) {
+      console.error("Generate error:", err);
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
