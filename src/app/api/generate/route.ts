@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
 
-function getOpenAI() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not set");
-  }
-  return new OpenAI({ apiKey });
-}
+export const runtime = "edge";
 
 interface GenerateRequest {
   productName: string;
@@ -21,6 +14,14 @@ interface GenerateRequest {
 
 export async function POST(request: NextRequest) {
   try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "OPENAI_API_KEY is not set" },
+        { status: 500 }
+      );
+    }
+
     const body: GenerateRequest = await request.json();
     const { productName, brandName, features, audience, keywords, tone, platform } = body;
 
@@ -74,24 +75,37 @@ Please output in the following JSON format:
   "description": "..."
 }`;
 
-    const openai = getOpenAI();
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert Amazon product listing copywriter. Generate high-converting, SEO-optimized content."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.7,
+    // Use OpenAI API directly via fetch (works better with edge runtime)
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert Amazon product listing copywriter. Generate high-converting, SEO-optimized content."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
+      }),
     });
 
-    const responseContent = completion.choices[0]?.message?.content;
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || "OpenAI API error");
+    }
+
+    const data = await response.json();
+    const responseContent = data.choices[0]?.message?.content;
 
     if (!responseContent) {
       throw new Error("No response from AI");
@@ -120,21 +134,6 @@ Please output in the following JSON format:
 
   } catch (error) {
     console.error("Generation error:", error);
-
-    if (error instanceof OpenAI.APIError) {
-      if (error.status === 401) {
-        return NextResponse.json(
-          { error: "Invalid API key. Please check your OpenAI API key." },
-          { status: 401 }
-        );
-      }
-      if (error.status === 429) {
-        return NextResponse.json(
-          { error: "Rate limit exceeded. Please try again later." },
-          { status: 429 }
-        );
-      }
-    }
 
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to generate content" },

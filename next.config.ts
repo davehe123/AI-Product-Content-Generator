@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Cloudflare Pages automatically uses OpenNext adapter when deploying via wrangler
+  // No additional config needed for API routes
 };
 
 export default nextConfig;
