@@ -1,0 +1,6 @@
+name = "ai-product-content-generator-api"
+compatibility_date = "2024-01-01"
+main = "worker.js"
+
+[vars]
+DEEPSEEK_API_KEY = "sk-9ada497fb48a406a8c3302e9475f15dd"

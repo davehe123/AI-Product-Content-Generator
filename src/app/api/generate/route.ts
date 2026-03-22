@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     if (!apiKey) {
       return NextResponse.json(
         { error: "DEEPSEEK_API_KEY is not set" },
-        { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
+        { status: 500 }
       );
     }
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     if (!productName || !features) {
       return NextResponse.json(
         { error: "Product name and features are required" },
-        { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
+        { status: 400 }
       );
     }
 
@@ -113,11 +113,6 @@ Please output in the following JSON format:
 
     const parsedResult = JSON.parse(responseContent);
 
-    // Validate the response structure
-    if (!parsedResult.title || !parsedResult.bulletPoints || !parsedResult.description) {
-      throw new Error("Invalid response format from AI");
-    }
-
     // Ensure we have exactly 5 bullet points
     const bulletPoints = Array.isArray(parsedResult.bulletPoints) 
       ? parsedResult.bulletPoints.slice(0, 5) 
@@ -130,14 +125,12 @@ Please output in the following JSON format:
         bulletPoints,
         description: parsedResult.description
       }
-    }, { headers: { "Access-Control-Allow-Origin": "*" } });
+    });
 
   } catch (error) {
-    console.error("Generation error:", error);
-
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to generate content" },
-      { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
+      { status: 500 }
     );
   }
 }
