@@ -16,16 +16,26 @@ function generateRandomString(length: number): string {
 export async function GET(): Promise<Response> {
   try {
     const clientId = process.env.GOOGLE_CLIENT_ID;
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://ai-product-content-generator.pages.dev';
-    const redirectUri = `${baseUrl}/api/auth/callback`;
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://75735d62.ai-product-content-generator.pages.dev';
+    
+    // Debug log
+    console.error('DEBUG clientId:', clientId);
+    console.error('DEBUG baseUrl:', baseUrl);
     
     if (!clientId) {
-      return new Response(JSON.stringify({ error: "GOOGLE_CLIENT_ID not configured" }), {
+      return new Response(JSON.stringify({ 
+        error: "GOOGLE_CLIENT_ID not configured",
+        env: {
+          GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+          NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
+        }
+      }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
     }
     
+    const redirectUri = `${baseUrl}/api/auth/callback`;
     const state = generateRandomString(32);
     const codeVerifier = generateRandomString(64);
     
