@@ -18,16 +18,14 @@ export async function GET(): Promise<Response> {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://75735d62.ai-product-content-generator.pages.dev';
     
-    // Debug log
-    console.error('DEBUG clientId:', clientId);
-    console.error('DEBUG baseUrl:', baseUrl);
-    
+    // Debug: return the env values so we can see what's happening
     if (!clientId) {
       return new Response(JSON.stringify({ 
-        error: "GOOGLE_CLIENT_ID not configured",
-        env: {
-          GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-          NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
+        error: "GOOGLE_CLIENT_ID not set",
+        debug: {
+          GOOGLE_CLIENT_ID_exists: !!process.env.GOOGLE_CLIENT_ID,
+          GOOGLE_CLIENT_ID_value: process.env.GOOGLE_CLIENT_ID || "undefined",
+          NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL || "undefined",
         }
       }), {
         status: 500,
@@ -53,7 +51,6 @@ export async function GET(): Promise<Response> {
     
     return Response.redirect(authUrl, 302);
   } catch (err) {
-    console.error("Auth google error:", err);
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
