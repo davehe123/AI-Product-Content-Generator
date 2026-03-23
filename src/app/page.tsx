@@ -61,13 +61,13 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
 
-    // 处理 OAuth 回调带回的 auth_data
     const authData = params.get("auth_data");
     const authCallback = params.get("auth_callback");
+    const oauthError = params.get("error");
 
+    // 处理 OAuth 回调带回的 auth_data
     if (authCallback === "1" && authData) {
       try {
-        // 解码 auth_data
         const padded = authData + "=".repeat((4 - (authData.length % 4)) % 4);
         const jsonStr = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
         const data = JSON.parse(jsonStr);
@@ -79,7 +79,6 @@ export default function Home() {
         console.error("Failed to parse auth_data:", err);
         setError("Login failed. Please try again.");
       }
-      // 清理 URL 参数
       window.history.replaceState({}, "", "/");
       setCheckingAuth(false);
       return;
@@ -99,8 +98,9 @@ export default function Home() {
       }
     }
     
-    if (params.get("error")) {
-      setError("Google login failed: " + params.get("error"));
+    // 只有在非 auth_callback 的情况下才显示 error
+    if (oauthError) {
+      setError("Google login failed: " + oauthError);
       window.history.replaceState({}, "", "/");
     }
     
