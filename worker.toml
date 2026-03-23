@@ -1,0 +1,11 @@
+name = "ai-product-content-generator-api"
+main = ".vercel/output/static/_worker.js/index.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "9e0a5262-527c-425c-bd3e-0299a24d2ec6"

@@ -1,6 +1,12 @@
 name = "ai-product-content-generator-api"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
 main = "worker.js"
 
 [vars]
 DEEPSEEK_API_KEY = "sk-9ada497fb48a406a8c3302e9475f15dd"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai_product_db"
+database_id = "88ba6100-a8ec-4bf2-8524-268c3402501e"

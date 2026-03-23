@@ -2,13 +2,27 @@
 
 import { useState, useEffect } from "react";
 
+const WORKER_URL = "https://ai-product-content-generator-api.deforde159.workers.dev";
+
+const PLAN_NAMES: Record<string, string> = {
+  free: "Free",
+  starter: "Starter",
+  pro: "Pro",
+  business: "Business",
+};
+
 interface User {
   id: string;
   email: string;
   name: string;
   picture: string;
+  subscription_plan: string;
   subscription_status: string;
-  subscription_plan: string | null;
+  monthly_credits: number;
+  monthly_used: number;
+  monthly_remaining: number;
+  package_remaining: number;
+  credits_remaining: number;
 }
 
 interface GenerateResult {
@@ -17,10 +31,17 @@ interface GenerateResult {
   description: string;
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("auth_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeMessage, setUpgradeMessage] = useState("");
   
   const [formData, setFormData] = useState({
     productName: "",
@@ -37,17 +58,78 @@ export default function Home() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
 
-  // 检查登录状态
   useEffect(() => {
-    checkAuth();
+    const params = new URLSearchParams(window.location.search);
+
+    // 处理 OAuth 回调带回的 auth_data
+    const authData = params.get("auth_data");
+    const authCallback = params.get("auth_callback");
+
+    if (authCallback === "1" && authData) {
+      try {
+        // 解码 auth_data
+        const padded = authData + "=".repeat((4 - (authData.length % 4)) % 4);
+        const jsonStr = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+        const data = JSON.parse(jsonStr);
+        localStorage.setItem("auth_token", data.token);
+        localStorage.setItem("auth_user", JSON.stringify(data.user));
+        setUser(data.user);
+        setAuthenticated(true);
+      } catch (err) {
+        console.error("Failed to parse auth_data:", err);
+        setError("Login failed. Please try again.");
+      }
+      // 清理 URL 参数
+      window.history.replaceState({}, "", "/");
+      setCheckingAuth(false);
+      return;
+    }
+
+    // 正常恢复登录状态
+    const storedUser = localStorage.getItem("auth_user");
+    const token = localStorage.getItem("auth_token");
+    
+    if (storedUser && token) {
+      try {
+        setUser(JSON.parse(storedUser));
+        setAuthenticated(true);
+      } catch {
+        localStorage.removeItem("auth_user");
+        localStorage.removeItem("auth_token");
+      }
+    }
+    
+    if (params.get("error")) {
+      setError("Google login failed: " + params.get("error"));
+      window.history.replaceState({}, "", "/");
+    }
+    
+    setCheckingAuth(false);
   }, []);
 
+  // postMessage 监听已移除，改用 URL 参数回传
+
   const checkAuth = async () => {
+    const token = localStorage.getItem("auth_token");
+    if (!token) {
+      setCheckingAuth(false);
+      return;
+    }
+    
     try {
-      const res = await fetch("/api/auth/me");
+      const res = await fetch(`${WORKER_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = await res.json();
-      setAuthenticated(data.authenticated);
-      setUser(data.user);
+      if (data.authenticated) {
+        setUser(data.user);
+        setAuthenticated(true);
+        localStorage.setItem("auth_user", JSON.stringify(data.user));
+      } else {
+        localStorage.removeItem("auth_token");
+        localStorage.removeItem("auth_user");
+        setAuthenticated(false);
+      }
     } catch (err) {
       console.error("Auth check failed:", err);
     } finally {
@@ -56,18 +138,27 @@ export default function Home() {
   };
 
   const handleLogin = () => {
-    window.location.href = "/api/auth/google";
+    const popup = window.open(
+      `${WORKER_URL}/auth/google`,
+      "google_login",
+      "width=500,height=600,scrollbars=yes"
+    );
   };
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      setAuthenticated(false);
-      setUser(null);
-      window.location.reload();
+      await fetch(`${WORKER_URL}/auth/logout`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
     } catch (err) {
       console.error("Logout failed:", err);
     }
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_user");
+    setAuthenticated(false);
+    setUser(null);
+    setResult(null);
   };
 
   const handleChange = (
@@ -83,28 +174,41 @@ export default function Home() {
     setResult(null);
 
     try {
-      console.log("Submitting form data:", formData);
-      
-      const response = await fetch("/api/generate", {
+      const response = await fetch(`${WORKER_URL}/api/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
         body: JSON.stringify(formData),
       });
 
-      console.log("Response status:", response.status);
-      
       const data = await response.json();
-      console.log("Response data:", data);
 
       if (!response.ok) {
-        throw new Error(data.error || `Failed to generate (${response.status})`);
+        if (response.status === 401) {
+          localStorage.removeItem("auth_token");
+          localStorage.removeItem("auth_user");
+          setAuthenticated(false);
+          throw new Error("Please login again");
+        }
+        if (response.status === 402 || data.error === "no_credits") {
+          setUpgradeMessage(data.message || "您的积分已用完");
+          setShowUpgradeModal(true);
+          return;
+        }
+        throw new Error(data.error || `Failed (${response.status})`);
       }
 
-      if (!data.data) {
-        throw new Error("No data returned from API");
-      }
+      if (!data.data) throw new Error("No data returned");
 
       setResult(data.data);
+      
+      // 更新本地积分显示
+      if (user && data.credits_remaining !== undefined) {
+        setUser({ ...user, credits_remaining: data.credits_remaining });
+      }
+
     } catch (err) {
       console.error("Generate error:", err);
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -129,7 +233,13 @@ export default function Home() {
     copyToClipboard(allContent, "all");
   };
 
-  // 检查登录状态时显示 loading
+  const creditPercent = () => {
+    if (!user) return 0;
+    const total = user.monthly_credits + user.package_remaining;
+    if (total === 0) return 0;
+    return Math.round((user.credits_remaining / total) * 100);
+  };
+
   if (checkingAuth) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
@@ -146,6 +256,45 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      {/* 升级弹窗 */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <div className="text-center">
+              <div className="text-5xl mb-4">⚡</div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">积分已用完</h2>
+              <p className="text-slate-600 mb-6">{upgradeMessage}</p>
+              
+              <div className="space-y-3 mb-6">
+                <div className="bg-slate-50 rounded-lg p-4 text-left">
+                  <p className="text-sm font-medium text-slate-700 mb-2">升级到 Pro 解锁更多</p>
+                  <ul className="text-sm text-slate-600 space-y-1">
+                    <li>✅ 200 次/月</li>
+                    <li>✅ 多语言支持（英/中/日/韩）</li>
+                    <li>✅ 30天历史记录</li>
+                    <li>✅ PDF/CSV 导出</li>
+                  </ul>
+                  <p className="text-lg font-bold text-blue-600 mt-3">$15/月</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowUpgradeModal(false)}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition"
+              >
+                升级到 Pro
+              </button>
+              <button
+                onClick={() => setShowUpgradeModal(false)}
+                className="w-full mt-2 text-slate-500 hover:text-slate-700 text-sm py-2"
+              >
+                稍后再说
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-4xl mx-auto px-4 py-12">
         {/* Header */}
         <div className="text-center mb-8">
@@ -156,26 +305,24 @@ export default function Home() {
             </h1>
             <div className="flex-1 flex justify-end items-center gap-3">
               {authenticated && user ? (
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-slate-700">{user.name || user.email}</p>
-                    <p className="text-xs text-slate-500">
-                      {user.subscription_status === "free" ? "Free Tier" : user.subscription_plan}
-                    </p>
+                <div className="text-right">
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-slate-700">{user.name || user.email}</p>
+                      <p className="text-xs text-blue-600 font-medium">
+                        {PLAN_NAMES[user.subscription_plan] || "Free"}
+                      </p>
+                    </div>
+                    {user.picture && (
+                      <img src={user.picture} alt={user.name} className="w-10 h-10 rounded-full" />
+                    )}
+                    <button
+                      onClick={handleLogout}
+                      className="text-sm bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg transition"
+                    >
+                      Logout
+                    </button>
                   </div>
-                  {user.picture && (
-                    <img 
-                      src={user.picture} 
-                      alt={user.name}
-                      className="w-10 h-10 rounded-full"
-                    />
-                  )}
-                  <button
-                    onClick={handleLogout}
-                    className="text-sm bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg transition"
-                  >
-                    Logout
-                  </button>
                 </div>
               ) : (
                 <button
@@ -196,12 +343,38 @@ export default function Home() {
           <p className="text-lg text-slate-600">
             Generate high-converting Amazon listings in seconds
           </p>
-          {!authenticated && (
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-              Please sign in to use the generator
-            </div>
-          )}
         </div>
+
+        {/* 积分显示条 */}
+        {authenticated && user && (
+          <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-slate-600">剩余积分</span>
+              <span className="text-sm font-bold text-blue-600">
+                {user.credits_remaining} 次
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-2">
+              <div
+                className="bg-blue-500 h-2 rounded-full transition-all"
+                style={{ width: `${creditPercent()}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-slate-400 mt-1">
+              <span>本月已用 {user.monthly_used} 次</span>
+              <span>
+                {user.monthly_credits > 0 ? `月额度 ${user.monthly_remaining} 次` : ""}
+                {user.package_remaining > 0 ? ` + 积分包 ${user.package_remaining} 次` : ""}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {!authenticated && (
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+            请登录后使用.generator（注册即送 3 次免费生成）
+          </div>
+        )}
 
         <div className="grid md:grid-cols-2 gap-8">
           {/* Input Form */}
@@ -221,7 +394,7 @@ export default function Home() {
                   value={formData.productName}
                   onChange={handleChange}
                   required
-                  disabled={!authenticated}
+                  disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
                   placeholder="Men's Ice Silk Underwear"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
@@ -236,7 +409,7 @@ export default function Home() {
                   name="brandName"
                   value={formData.brandName}
                   onChange={handleChange}
-                  disabled={!authenticated}
+                  disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
                   placeholder="CozyFit"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
@@ -251,7 +424,7 @@ export default function Home() {
                   value={formData.features}
                   onChange={handleChange}
                   required
-                  disabled={!authenticated}
+                  disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
                   rows={3}
                   placeholder="breathable, cooling, seamless"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition resize-none disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -267,7 +440,7 @@ export default function Home() {
                   name="audience"
                   value={formData.audience}
                   onChange={handleChange}
-                  disabled={!authenticated}
+                  disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
                   placeholder="men, athletes"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
@@ -282,7 +455,7 @@ export default function Home() {
                   name="keywords"
                   value={formData.keywords}
                   onChange={handleChange}
-                  disabled={!authenticated}
+                  disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
                   placeholder="ice silk underwear, mens underwear"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
@@ -290,14 +463,12 @@ export default function Home() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Tone
-                  </label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tone</label>
                   <select
                     name="tone"
                     value={formData.tone}
                     onChange={handleChange}
-                    disabled={!authenticated}
+                    disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                   >
                     <option value="professional">Professional</option>
@@ -308,14 +479,12 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Platform
-                  </label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Platform</label>
                   <select
                     name="platform"
                     value={formData.platform}
                     onChange={handleChange}
-                    disabled={!authenticated}
+                    disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                   >
                     <option value="amazon">Amazon</option>
@@ -326,7 +495,7 @@ export default function Home() {
 
               <button
                 type="submit"
-                disabled={loading || !authenticated}
+                disabled={loading || !authenticated || (user?.credits_remaining ?? 0) <= 0}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2"
               >
                 {loading ? (
@@ -337,6 +506,8 @@ export default function Home() {
                     </svg>
                     Generating...
                   </>
+                ) : (user?.credits_remaining ?? 0) <= 0 ? (
+                  "积分已用完"
                 ) : (
                   <>✨ Generate Listing</>
                 )}
@@ -387,7 +558,6 @@ export default function Home() {
 
             {result && (
               <div className="space-y-6">
-                {/* Title */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-semibold text-slate-700">Product Title</h3>
@@ -403,7 +573,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Bullet Points */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-semibold text-slate-700">Bullet Points</h3>
@@ -424,7 +593,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Description */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-semibold text-slate-700">Product Description</h3>
@@ -446,7 +614,7 @@ export default function Home() {
 
         {/* Footer */}
         <div className="mt-12 text-center text-sm text-slate-500">
-          <p>Free tier: 10 generations per day</p>
+          <p>注册即送 3 次免费生成 · 升级 Pro 解锁更多</p>
         </div>
       </div>
     </div>
