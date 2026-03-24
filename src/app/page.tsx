@@ -81,20 +81,32 @@ export default function Home() {
 
     // 处理 OAuth 回调带回的 auth_data
     if (authCallback === "1" && authData) {
-      try {
-        const padded = authData + "=".repeat((4 - (authData.length % 4)) % 4);
-        const jsonStr = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
-        const data = JSON.parse(jsonStr);
-        localStorage.setItem("auth_token", data.token);
-        localStorage.setItem("auth_user", JSON.stringify(data.user));
-        setUser(data.user);
-        setAuthenticated(true);
-      } catch (err) {
-        console.error("Failed to parse auth_data:", err);
-        setError("Login failed. Please try again.");
-      }
-      window.history.replaceState({}, "", "/");
-      setCheckingAuth(false);
+      (async () => {
+        try {
+          const padded = authData + "=".repeat((4 - (authData.length % 4)) % 4);
+          const jsonStr = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+          const data = JSON.parse(jsonStr);
+          localStorage.setItem("auth_token", data.token);
+
+          // 用 token 获取完整的用户信息（含积分）
+          const meRes = await fetch(`${WORKER_URL}/auth/me`, {
+            headers: { Authorization: `Bearer ${data.token}` },
+          });
+          const meData = await meRes.json();
+          if (meData.authenticated) {
+            localStorage.setItem("auth_user", JSON.stringify(meData.user));
+            setUser(meData.user);
+            setAuthenticated(true);
+          } else {
+            setError("Login failed. Please try again.");
+          }
+        } catch (err) {
+          console.error("Failed to parse auth_data:", err);
+          setError("Login failed. Please try again.");
+        }
+        window.history.replaceState({}, "", "/");
+        setCheckingAuth(false);
+      })();
       return;
     }
 
