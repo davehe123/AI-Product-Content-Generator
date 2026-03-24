@@ -266,10 +266,19 @@ export default {
         const redirectUrl = FRONTEND_URL + "/?auth_callback=1&auth_data=" + authData;
 
         const html = `<!DOCTYPE html>
-<html><head><meta http-equiv="refresh" content="0;url=${redirectUrl}"></head>
-<body><p>Login successful! Redirecting...</p>
-<script>window.close();</script>
-</body></html>`;
+<html>
+<head><title>Login Success</title></head>
+<body style="font-family:Arial,sans-serif;text-align:center;padding-top:80px;background:#f0f9ff;">
+<p style="font-size:24px;margin-bottom:12px;">✅ Login Successful!</p>
+<p id="msg" style="color:#666;">Redirecting to app...</p>
+<script>
+  // Redirect to frontend so it can process auth_data, then close popup after short delay
+  setTimeout(function() {
+    window.location.replace(${JSON.stringify(redirectUrl)});
+  }, 500);
+</script>
+</body>
+</html>`;
 
         return new Response(html, {
           headers: { "Content-Type": "text/html; charset=utf-8" },
