@@ -15,8 +15,126 @@ const PACKAGES = {
   "大包": { credits: 600, price: 39 },
 };
 
-// 内存 session store（生产环境建议用 KV）
+// ========== 辅助函数 ==========
+
+// 内存 session store（Cloudflare Worker 多实例不共享，但 auth callback 在同一实例走完）
 const sessions = new Map();
+
+function corsHeaders(origin = "*") {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Credentials": "true",
+  };
+}
+
+function getSessionToken(request) {
+  const auth = request.headers.get("Authorization");
+  if (auth?.startsWith("Bearer ")) return auth.substring(7);
+  const cookies = request.headers.get("Cookie") || "";
+  const m = cookies.match(/session_token=([^;]+)/);
+  return m ? m[1] : null;
+}
+
+function base64urlEncode(data) {
+  return btoa(JSON.stringify(data)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+function base64urlDecode(str) {
+  // Add padding
+  str = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (str.length % 4) str += "=";
+  return JSON.parse(atob(str));
+}
+
+function generateState() {
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function generateCodeVerifier() {
+  const a = new Uint8Array(32);
+  crypto.getRandomValues(a);
+  return btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+async function generateCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+function generateSessionToken() {
+  const a = new Uint8Array(32);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function getUserUsage(db, userId, tier) {
+  const usedRes = await db
+    .prepare("SELECT COUNT(*) as count FROM generations WHERE user_id = ?")
+    .bind(userId)
+    .first();
+  const monthlyUsed = usedRes?.count || 0;
+
+  const pkgRes = await db
+    .prepare(
+      "SELECT COALESCE(SUM(credits_added), 0) - (SELECT COALESCE(SUM(credits_deducted), 0) FROM transactions WHERE user_id = ? AND type = 'usage') as remaining FROM transactions WHERE user_id = ? AND type IN ('package', 'bonus')"
+    )
+    .bind(userId, userId)
+    .first();
+  const packageRemaining = Math.max(0, pkgRes?.remaining || 0);
+
+  const plan = PLANS[tier] || PLANS.free;
+  const monthlyRemaining = Math.max(0, plan.monthly_credits - monthlyUsed);
+
+  return {
+    monthly_credits: plan.monthly_credits,
+    monthly_used: monthlyUsed,
+    monthly_remaining: monthlyRemaining,
+    package_remaining: packageRemaining,
+    credits_remaining: monthlyRemaining + packageRemaining,
+    plan: tier,
+  };
+}
+
+function buildPrompt({ productName, brandName, features, audience, keywords, tone, platform }) {
+  return `You are an expert eCommerce copywriter specializing in Amazon product listings.
+
+Generate a high-converting product listing with:
+
+## 1. Product Title (150-200 characters)
+Format: Brand + Core Keywords + Product Type + Features
+
+## 2. Five Bullet Points
+Each includes: feature, user benefit, emotional appeal, use case
+
+## 3. Product Description (2-3 paragraphs)
+Sales-driven language with clear CTA and natural keyword integration
+
+Requirements:
+- High conversion focus, highlight user benefits
+- Native English, follow Amazon SEO best practices
+
+Input:
+Product: ${productName}
+Brand: ${brandName || "N/A"}
+Features: ${features}
+Target Audience: ${audience || "General"}
+Core Keywords: ${keywords || "N/A"}
+Tone: ${tone}
+
+Output JSON format:
+{
+  "title": "...",
+  "bulletPoints": ["...", "...", "...", "...", "..."],
+  "description": "..."
+}`;
+}
+
+// ========== Worker Main ==========
 
 export default {
   async fetch(request, env, ctx) {
@@ -24,29 +142,24 @@ export default {
     const pathname = url.pathname;
 
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      });
+      return new Response(null, { headers: corsHeaders(request.headers.get("Origin")) });
     }
 
-    // ========== OAuth ==========
+    // ========== OAuth - Step 1: 跳转 Google ==========
 
     if (pathname === "/auth/google" && request.method === "GET") {
       const state = generateState();
       const codeVerifier = generateCodeVerifier();
-      sessions.set(state, { codeVerifier, createdAt: Date.now() });
-      setTimeout(() => sessions.delete(state), 10 * 60 * 1000);
+      // 把 codeVerifier + state 一起编码进 state 参数，callback 不需要 cookie
+      const stateData = base64urlEncode({ cv: codeVerifier, st: state });
+      const fullState = state + "." + stateData;
 
       const params = new URLSearchParams({
         client_id: env.GOOGLE_CLIENT_ID,
         redirect_uri: url.origin + "/auth/callback",
         response_type: "code",
         scope: "openid email profile",
-        state,
+        state: fullState,
         code_challenge: await generateCodeChallenge(codeVerifier),
         code_challenge_method: "S256",
       });
@@ -57,26 +170,36 @@ export default {
       );
     }
 
+    // ========== OAuth - Step 2: Google 回调 ==========
+
     if (pathname === "/auth/callback" && request.method === "GET") {
       const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      const error = url.searchParams.get("error");
+      const errorParam = url.searchParams.get("error");
+      const fullState = url.searchParams.get("state");
 
-      if (error) {
-        return Response.redirect(FRONTEND_URL + "/?error=" + encodeURIComponent(error), 302);
+      if (errorParam) {
+        return Response.redirect(FRONTEND_URL + "/?error=" + encodeURIComponent(errorParam) + "&auth_callback=1", 302);
       }
-      if (!code || !state) {
-        return Response.redirect(FRONTEND_URL + "/?error=missing_params", 302);
+      if (!code || !fullState) {
+        return Response.redirect(FRONTEND_URL + "/?error=missing_params&auth_callback=1", 302);
       }
 
-      const sessionData = sessions.get(state);
-      if (!sessionData) {
-        return Response.redirect(FRONTEND_URL + "/?error=invalid_state", 302);
+      let codeVerifier = null;
+      let originalState = null;
+      try {
+        const dotIdx = fullState.indexOf(".");
+        originalState = fullState.substring(0, dotIdx);
+        const stateDataStr = fullState.substring(dotIdx + 1);
+        const stateData = base64urlDecode(stateDataStr);
+        codeVerifier = stateData.cv;
+        // 校验 state 匹配
+        if (stateData.st !== originalState) throw new Error("state mismatch");
+      } catch (err) {
+        console.error("Invalid state:", err.message);
+        return Response.redirect(FRONTEND_URL + "/?error=invalid_state&auth_callback=1", 302);
       }
-      sessions.delete(state);
 
       try {
-        // 换 token
         const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -86,17 +209,18 @@ export default {
             code,
             grant_type: "authorization_code",
             redirect_uri: url.origin + "/auth/callback",
-            code_verifier: sessionData.codeVerifier,
+            code_verifier: codeVerifier,
           }),
         });
         const tokenData = await tokenRes.json();
-        if (!tokenData.access_token) throw new Error("No access token");
+        if (!tokenData.access_token) throw new Error("No access token: " + JSON.stringify(tokenData));
 
-        // 获取用户信息
+        // 获取 Google 用户信息
         const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
           headers: { Authorization: "Bearer " + tokenData.access_token },
         });
         const googleUser = await userRes.json();
+        if (!googleUser.email) throw new Error("No email from Google");
 
         // 查找或创建用户
         let user = await env.DB
@@ -106,14 +230,14 @@ export default {
 
         if (!user) {
           const userId = crypto.randomUUID();
+          const sessionToken = generateSessionToken();
           await env.DB
             .prepare(
-              "INSERT INTO users (id, email, name, picture, google_id, subscription_status, last_login) VALUES (?, ?, ?, ?, ?, 'active', ?)"
+              "INSERT INTO users (id, email, name, picture, google_id, subscription_status, last_login, session_token) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)"
             )
-            .bind(userId, googleUser.email, googleUser.name || "", googleUser.picture || "", googleUser.id, Date.now())
+            .bind(userId, googleUser.email, googleUser.name || "", googleUser.picture || "", googleUser.id, Date.now(), sessionToken)
             .run();
 
-          // 注册赠送3次积分
           await env.DB
             .prepare(
               "INSERT INTO transactions (id, user_id, type, description, credits_added) VALUES (?, ?, 'bonus', '注册赠送', 3)"
@@ -121,52 +245,54 @@ export default {
             .bind(crypto.randomUUID(), userId)
             .run();
 
-          user = await env.DB
-            .prepare("SELECT * FROM users WHERE id = ?")
-            .bind(userId)
-            .first();
+          user = { id: userId, email: googleUser.email, name: googleUser.name || "", subscription_plan: "free", session_token: sessionToken };
         } else {
+          // 更新最后登录时间
           await env.DB
             .prepare("UPDATE users SET last_login = ? WHERE id = ?")
             .bind(Date.now(), user.id)
             .run();
         }
 
-        // 生成 session token
+        // 生成新的 session token
         const sessionToken = generateSessionToken();
-        sessions.set(sessionToken, { userId: user.id, createdAt: Date.now() });
+        await env.DB
+          .prepare("UPDATE users SET session_token = ? WHERE id = ?")
+          .bind(sessionToken, user.id)
+          .run();
 
-        // 通过 URL 参数回传
-        const authData = btoa(JSON.stringify({ token: sessionToken, user }))
-          .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+        // 把 token 通过 URL 返回给前端
+        const authData = base64urlEncode({ token: sessionToken, userId: user.id, email: user.email, name: user.name });
         const redirectUrl = FRONTEND_URL + "/?auth_callback=1&auth_data=" + authData;
 
         const html = `<!DOCTYPE html>
 <html><head><meta http-equiv="refresh" content="0;url=${redirectUrl}"></head>
-<body><script>window.location.href='${redirectUrl}';setTimeout(()=>window.close(),500);</script>
-<p>登录成功，正在跳转...</p></body></html>`;
+<body><p>Login successful! Redirecting...</p>
+<script>window.close();</script>
+</body></html>`;
 
         return new Response(html, {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
 
       } catch (err) {
-        console.error("OAuth callback error:", err.message);
-        return Response.redirect(FRONTEND_URL + "/?error=oauth_failed", 302);
+        const detail = err.message || String(err);
+        console.error("OAuth error:", err.stack || detail);
+        return Response.redirect(FRONTEND_URL + "/?error=oauth_failed&detail=" + encodeURIComponent(detail) + "&auth_callback=1", 302);
       }
     }
 
+    // ========== 当前用户 ==========
+
     if (pathname === "/auth/me" && request.method === "GET") {
-      const sessionToken = getBearerToken(request);
-      if (!sessionToken) return Response.json({ authenticated: false, user: null });
-      const sessionData = sessions.get(sessionToken);
-      if (!sessionData) return Response.json({ authenticated: false, user: null });
+      const sessionToken = getSessionToken(request);
+      if (!sessionToken) return Response.json({ authenticated: false, user: null }, { headers: corsHeaders() });
 
       const user = await env.DB
-        .prepare("SELECT * FROM users WHERE id = ?")
-        .bind(sessionData.userId)
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
         .first();
-      if (!user) return Response.json({ authenticated: false, user: null });
+      if (!user) return Response.json({ authenticated: false, user: null }, { headers: corsHeaders() });
 
       const usage = await getUserUsage(env.DB, user.id, user.subscription_plan || "free");
       return Response.json({
@@ -180,26 +306,28 @@ export default {
           subscription_status: user.subscription_status || "active",
           ...usage,
         },
-      });
+      }, { headers: corsHeaders() });
     }
+
+    // ========== 登出 ==========
 
     if (pathname === "/auth/logout" && request.method === "POST") {
-      const sessionToken = getBearerToken(request);
-      if (sessionToken) sessions.delete(sessionToken);
-      return Response.json({ success: true });
+      const sessionToken = getSessionToken(request);
+      if (sessionToken) {
+        await env.DB.prepare("UPDATE users SET session_token = NULL WHERE session_token = ?").bind(sessionToken).run();
+      }
+      return Response.json({ success: true }, { headers: corsHeaders() });
     }
 
-    // ========== 用量 ==========
+    // ========== 用量查询 ==========
 
     if (pathname === "/user/usage" && request.method === "GET") {
-      const sessionToken = getBearerToken(request);
+      const sessionToken = getSessionToken(request);
       if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401 });
-      const sessionData = sessions.get(sessionToken);
-      if (!sessionData) return Response.json({ error: "Invalid session" }, { status: 401 });
 
       const user = await env.DB
-        .prepare("SELECT * FROM users WHERE id = ?")
-        .bind(sessionData.userId)
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
         .first();
       if (!user) return Response.json({ error: "User not found" }, { status: 404 });
 
@@ -207,17 +335,15 @@ export default {
       return Response.json({ usage });
     }
 
-    // ========== 生成 ==========
+    // ========== 生成内容 ==========
 
     if (pathname === "/api/generate" && request.method === "POST") {
-      const sessionToken = getBearerToken(request);
+      const sessionToken = getSessionToken(request);
       if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401 });
-      const sessionData = sessions.get(sessionToken);
-      if (!sessionData) return Response.json({ error: "Invalid session" }, { status: 401 });
 
       const user = await env.DB
-        .prepare("SELECT * FROM users WHERE id = ?")
-        .bind(sessionData.userId)
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
         .first();
       if (!user) return Response.json({ error: "User not found" }, { status: 404 });
 
@@ -298,140 +424,23 @@ export default {
       }
     }
 
-    // ========== 积分包 ==========
-
-    if (pathname === "/user/package" && request.method === "POST") {
-      const sessionToken = getBearerToken(request);
-      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401 });
-      const sessionData = sessions.get(sessionToken);
-      if (!sessionData) return Response.json({ error: "Invalid session" }, { status: 401 });
-
-      const body = await request.json();
-      const { package_key } = body;
-      const pkg = PACKAGES[package_key];
-      if (!pkg) return Response.json({ error: "Invalid package" }, { status: 400 });
-
-      await env.DB
-        .prepare(
-          "INSERT INTO transactions (id, user_id, type, description, credits_added, amount_paid) VALUES (?, ?, 'package', ?, ?, ?)"
-        )
-        .bind(crypto.randomUUID(), sessionData.userId, package_key, pkg.credits, pkg.price)
-        .run();
-
-      return Response.json({ success: true, credits_added: pkg.credits });
-    }
-
     // ========== 套餐列表 ==========
 
     if (pathname === "/plans" && request.method === "GET") {
       return Response.json({ plans: PLANS, packages: PACKAGES });
     }
 
+    // ========== 测试 D1 ==========
+
+    if (pathname === "/test/d1" && request.method === "GET") {
+      try {
+        const result = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+        return Response.json({ ok: true, tables: result.results });
+      } catch (err) {
+        return Response.json({ ok: false, error: err.message });
+      }
+    }
+
     return Response.json({ error: "Not found" }, { status: 404 });
   },
 };
-
-// ========== 核心用量逻辑 ==========
-
-async function getUserUsage(db, userId, tier) {
-  const now = Math.floor(Date.now() / 1000);
-
-  // 本月使用次数
-  const usedRes = await db
-    .prepare("SELECT COUNT(*) as count FROM generations WHERE user_id = ?")
-    .bind(userId)
-    .first();
-  const monthlyUsed = usedRes?.count || 0;
-
-  // 积分包总剩余
-  const pkgRes = await db
-    .prepare(
-      "SELECT COALESCE(SUM(credits_added), 0) - (SELECT COALESCE(SUM(credits_deducted), 0) FROM transactions WHERE user_id = ? AND type = 'usage') as remaining FROM transactions WHERE user_id = ? AND type IN ('package', 'bonus')"
-    )
-    .bind(userId, userId)
-    .first();
-  const packageRemaining = Math.max(0, pkgRes?.remaining || 0);
-
-  const plan = PLANS[tier] || PLANS.free;
-  const monthlyRemaining = Math.max(0, plan.monthly_credits - monthlyUsed);
-
-  return {
-    monthly_credits: plan.monthly_credits,
-    monthly_used: monthlyUsed,
-    monthly_remaining: monthlyRemaining,
-    package_remaining: packageRemaining,
-    credits_remaining: monthlyRemaining + packageRemaining,
-    plan: tier,
-  };
-}
-
-// ========== 辅助函数 ==========
-
-function getBearerToken(request) {
-  const auth = request.headers.get("Authorization");
-  if (auth?.startsWith("Bearer ")) return auth.substring(7);
-  const cookie = request.headers.get("Cookie");
-  if (cookie) {
-    const m = cookie.match(/session=([^;]+)/);
-    return m ? m[1] : null;
-  }
-  return null;
-}
-
-function generateState() {
-  const a = new Uint8Array(32);
-  crypto.getRandomValues(a);
-  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function generateCodeVerifier() {
-  const a = new Uint8Array(32);
-  crypto.getRandomValues(a);
-  return btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-
-async function generateCodeChallenge(verifier) {
-  const data = new TextEncoder().encode(verifier);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-
-function generateSessionToken() {
-  const a = new Uint8Array(32);
-  crypto.getRandomValues(a);
-  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function buildPrompt({ productName, brandName, features, audience, keywords, tone, platform }) {
-  return `You are an expert eCommerce copywriter specializing in Amazon product listings.
-
-Generate a high-converting product listing with:
-
-## 1. Product Title (150-200 characters)
-Format: Brand + Core Keywords + Product Type + Features
-
-## 2. Five Bullet Points
-Each includes: feature, user benefit, emotional appeal, use case
-
-## 3. Product Description (2-3 paragraphs)
-Sales-driven language with clear CTA and natural keyword integration
-
-Requirements:
-- High conversion focus, highlight user benefits
-- Native English, follow Amazon SEO best practices
-
-Input:
-Product: ${productName}
-Brand: ${brandName || "N/A"}
-Features: ${features}
-Target Audience: ${audience || "General"}
-Core Keywords: ${keywords || "N/A"}
-Tone: ${tone}
-
-Output JSON format:
-{
-  "title": "...",
-  "bulletPoints": ["...", "...", "...", "...", "..."],
-  "description": "..."
-}`;
-}

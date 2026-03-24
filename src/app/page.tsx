@@ -100,8 +100,9 @@ export default function Home() {
     
     // 只有在非 auth_callback 的情况下才显示 error
     if (oauthError) {
-      setError("Google login failed: " + oauthError);
-      window.history.replaceState({}, "", "/");
+      const detail = new URLSearchParams(window.location.search).get("detail") || "";
+      setError("Google login failed: " + oauthError + (detail ? " | " + detail : ""));
+      window.history.replaceState({}, "", "/?");
     }
     
     setCheckingAuth(false);
