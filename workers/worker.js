@@ -430,6 +430,57 @@ export default {
       return Response.json({ plans: PLANS, packages: PACKAGES });
     }
 
+    // ========== 模拟支付 ==========
+
+    if (pathname === "/api/fake-pay" && request.method === "POST") {
+      const sessionToken = getSessionToken(request);
+      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+      const user = await env.DB
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
+        .first();
+      if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      }
+
+      const { package_key } = body;
+      if (!package_key || !PACKAGES[package_key]) {
+        return Response.json({ error: "Invalid package" }, { status: 400 });
+      }
+
+      const pkg = PACKAGES[package_key];
+
+      // 模拟支付处理延迟（1-2秒）
+      await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 1000));
+
+      // 记录购买交易
+      await env.DB
+        .prepare(
+          "INSERT INTO transactions (id, user_id, type, description, credits_added) VALUES (?, ?, 'package', ?, ?)"
+        )
+        .bind(crypto.randomUUID(), user.id, `购买 ${package_key}`, pkg.credits)
+        .run();
+
+      // 获取更新后的用量
+      const newUsage = await getUserUsage(env.DB, user.id, user.subscription_plan || "free");
+
+      return Response.json({
+        success: true,
+        package: package_key,
+        credits_added: pkg.credits,
+        new_balance: newUsage.credits_remaining,
+        package_remaining: newUsage.package_remaining,
+        monthly_remaining: newUsage.monthly_remaining,
+        credits_remaining: newUsage.credits_remaining,
+      });
+    }
+
     // ========== 测试 D1 ==========
 
     if (pathname === "/test/d1" && request.method === "GET") {

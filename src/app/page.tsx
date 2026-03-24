@@ -11,6 +11,13 @@ const PLAN_NAMES: Record<string, string> = {
   business: "Business",
 };
 
+const PACKAGES = [
+  { key: "体验包", credits: 10, price: 1 },
+  { key: "小包", credits: 60, price: 5 },
+  { key: "中包", credits: 200, price: 15 },
+  { key: "大包", credits: 600, price: 39 },
+];
+
 interface User {
   id: string;
   email: string;
@@ -57,6 +64,13 @@ export default function Home() {
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+
+  // Buy credits modal
+  const [showBuyModal, setShowBuyModal] = useState(false);
+  const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
+  const [buyLoading, setBuyLoading] = useState(false);
+  const [buySuccess, setBuySuccess] = useState(false);
+  const [buyError, setBuyError] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -234,6 +248,60 @@ export default function Home() {
     copyToClipboard(allContent, "all");
   };
 
+  const handleBuyCredits = async (packageKey: string) => {
+    setBuyingPackage(packageKey);
+    setBuyLoading(true);
+    setBuyError("");
+    setBuySuccess(false);
+
+    try {
+      const response = await fetch(`${WORKER_URL}/api/fake-pay`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ package_key: packageKey }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Payment failed");
+      }
+
+      setBuySuccess(true);
+
+      // Update user credits
+      if (user && data.credits_remaining !== undefined) {
+        setUser({
+          ...user,
+          credits_remaining: data.credits_remaining,
+          package_remaining: data.package_remaining,
+          monthly_remaining: data.monthly_remaining,
+        });
+        localStorage.setItem("auth_user", JSON.stringify({
+          ...user,
+          credits_remaining: data.credits_remaining,
+          package_remaining: data.package_remaining,
+          monthly_remaining: data.monthly_remaining,
+        }));
+      }
+
+      // Auto close after 2 seconds
+      setTimeout(() => {
+        setShowBuyModal(false);
+        setBuySuccess(false);
+        setBuyingPackage(null);
+      }, 2000);
+
+    } catch (err) {
+      setBuyError(err instanceof Error ? err.message : "Payment failed");
+    } finally {
+      setBuyLoading(false);
+    }
+  };
+
   const creditPercent = () => {
     if (!user) return 0;
     const total = user.monthly_credits + user.package_remaining;
@@ -265,7 +333,7 @@ export default function Home() {
               <div className="text-5xl mb-4">⚡</div>
               <h2 className="text-2xl font-bold text-slate-800 mb-2">积分已用完</h2>
               <p className="text-slate-600 mb-6">{upgradeMessage}</p>
-              
+
               <div className="space-y-3 mb-6">
                 <div className="bg-slate-50 rounded-lg p-4 text-left">
                   <p className="text-sm font-medium text-slate-700 mb-2">升级到 Pro 解锁更多</p>
@@ -292,6 +360,77 @@ export default function Home() {
                 稍后再说
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 购买积分弹窗 */}
+      {showBuyModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <div className="text-center mb-6">
+              <div className="text-4xl mb-3">💰</div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">购买积分</h2>
+              <p className="text-slate-600 text-sm">选择积分包进行充值（模拟支付）</p>
+            </div>
+
+            {buySuccess ? (
+              <div className="text-center py-6">
+                <div className="text-5xl mb-3">✅</div>
+                <h3 className="text-xl font-bold text-green-600 mb-2">购买成功！</h3>
+                <p className="text-slate-600">积分已添加到您的账户</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-3 mb-6">
+                  {PACKAGES.map((pkg) => (
+                    <button
+                      key={pkg.key}
+                      onClick={() => handleBuyCredits(pkg.key)}
+                      disabled={buyLoading}
+                      className={`w-full flex items-center justify-between p-4 rounded-lg border-2 transition ${
+                        buyingPackage === pkg.key && buyLoading
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-slate-200 hover:border-blue-500 hover:bg-blue-50"
+                      }`}
+                    >
+                      <div className="text-left">
+                        <p className="font-semibold text-slate-800">{pkg.key}</p>
+                        <p className="text-sm text-slate-500">{pkg.credits} 积分</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {buyingPackage === pkg.key && buyLoading ? (
+                          <svg className="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <span className="text-lg font-bold text-green-600">${pkg.price}</span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {buyError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                    {buyError}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    setShowBuyModal(false);
+                    setBuyingPackage(null);
+                    setBuyError("");
+                  }}
+                  disabled={buyLoading}
+                  className="w-full mt-2 text-slate-500 hover:text-slate-700 text-sm py-2 disabled:opacity-50"
+                >
+                  取消
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -351,9 +490,17 @@ export default function Home() {
           <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-slate-600">剩余积分</span>
-              <span className="text-sm font-bold text-blue-600">
-                {user.credits_remaining} 次
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-bold text-blue-600">
+                  {user.credits_remaining} 次
+                </span>
+                <button
+                  onClick={() => setShowBuyModal(true)}
+                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg transition font-medium"
+                >
+                  购买积分
+                </button>
+              </div>
             </div>
             <div className="w-full bg-slate-100 rounded-full h-2">
               <div
