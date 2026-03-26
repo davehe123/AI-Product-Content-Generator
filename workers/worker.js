@@ -150,8 +150,10 @@ export default {
     if (pathname === "/auth/google" && request.method === "GET") {
       const state = generateState();
       const codeVerifier = generateCodeVerifier();
-      // 把 codeVerifier + state 一起编码进 state 参数，callback 不需要 cookie
-      const stateData = base64urlEncode({ cv: codeVerifier, st: state });
+      // 前端 URL（域名可能每次部署变化）
+      const frontendUrl = url.searchParams.get("frontend_url") || FRONTEND_URL;
+      // 把 codeVerifier + state + frontendUrl 一起编码进 state 参数，callback 不需要 cookie
+      const stateData = base64urlEncode({ cv: codeVerifier, st: state, fu: frontendUrl });
       const fullState = state + "." + stateData;
 
       const params = new URLSearchParams({
@@ -186,12 +188,14 @@ export default {
 
       let codeVerifier = null;
       let originalState = null;
+      let frontendUrl = FRONTEND_URL;
       try {
         const dotIdx = fullState.indexOf(".");
         originalState = fullState.substring(0, dotIdx);
         const stateDataStr = fullState.substring(dotIdx + 1);
         const stateData = base64urlDecode(stateDataStr);
         codeVerifier = stateData.cv;
+        frontendUrl = stateData.fu || FRONTEND_URL;
         // 校验 state 匹配
         if (stateData.st !== originalState) throw new Error("state mismatch");
       } catch (err) {
@@ -263,7 +267,7 @@ export default {
 
         // 把 token 通过 URL 返回给前端
         const authData = base64urlEncode({ token: sessionToken, userId: user.id, email: user.email, name: user.name });
-        const redirectUrl = FRONTEND_URL + "/?auth_callback=1&auth_data=" + authData;
+        const redirectUrl = frontendUrl + "/?auth_callback=1&auth_data=" + authData;
 
         const html = `<!DOCTYPE html>
 <html>
@@ -287,7 +291,7 @@ export default {
       } catch (err) {
         const detail = err.message || String(err);
         console.error("OAuth error:", err.stack || detail);
-        return Response.redirect(FRONTEND_URL + "/?error=oauth_failed&detail=" + encodeURIComponent(detail) + "&auth_callback=1", 302);
+        return Response.redirect(frontendUrl + "/?error=oauth_failed&detail=" + encodeURIComponent(detail) + "&auth_callback=1", 302);
       }
     }
 
@@ -347,14 +351,15 @@ export default {
     // ========== 生成内容 ==========
 
     if (pathname === "/api/generate" && request.method === "POST") {
+      const cors = corsHeaders(request.headers.get("Origin"));
       const sessionToken = getSessionToken(request);
-      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401 });
+      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401, headers: cors });
 
       const user = await env.DB
         .prepare("SELECT * FROM users WHERE session_token = ?")
         .bind(sessionToken)
         .first();
-      if (!user) return Response.json({ error: "User not found" }, { status: 404 });
+      if (!user) return Response.json({ error: "User not found" }, { status: 404, headers: cors });
 
       const usage = await getUserUsage(env.DB, user.id, user.subscription_plan || "free");
       if (usage.credits_remaining <= 0) {
@@ -362,14 +367,14 @@ export default {
           error: "no_credits",
           message: "积分已用完，请升级套餐或购买积分包",
           credits_remaining: 0,
-        }, { status: 402 });
+        }, { status: 402, headers: cors });
       }
 
       try {
         const body = await request.json();
         const { productName, brandName, features, audience, keywords, tone, platform } = body;
         if (!productName || !features) {
-          return Response.json({ error: "Product name and features required" }, { status: 400 });
+          return Response.json({ error: "Product name and features required" }, { status: 400, headers: cors });
         }
 
         const prompt = buildPrompt({ productName, brandName, features, audience, keywords, tone, platform });
@@ -426,10 +431,10 @@ export default {
           success: true,
           data: { title: result.title, bulletPoints: bullets, description: result.description },
           credits_remaining: newUsage.credits_remaining,
-        });
+        }, { headers: cors });
 
       } catch (err) {
-        return Response.json({ error: err.message || "Generation failed" }, { status: 500 });
+        return Response.json({ error: err.message || "Generation failed" }, { status: 500, headers: cors });
       }
     }
 

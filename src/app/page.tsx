@@ -106,6 +106,11 @@ export default function Home() {
         }
         window.history.replaceState({}, "", "/");
         setCheckingAuth(false);
+        // 登录成功，关闭 popup 并通知主窗口刷新
+        if (window.opener && !window.opener.closed) {
+          window.opener.location.reload();
+        }
+        window.close();
       })();
       return;
     }
@@ -165,8 +170,9 @@ export default function Home() {
   };
 
   const handleLogin = () => {
+    const frontendUrl = window.location.origin;
     const popup = window.open(
-      `${WORKER_URL}/auth/google`,
+      `${WORKER_URL}/auth/google?frontend_url=${encodeURIComponent(frontendUrl)}`,
       "google_login",
       "width=500,height=600,scrollbars=yes"
     );
