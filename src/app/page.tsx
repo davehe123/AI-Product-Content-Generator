@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { exportToPDF, exportToCSV } from "./utils/export";
 
 const WORKER_URL = "https://ai-product-content-generator-api.deforde159.workers.dev";
 
@@ -861,12 +862,26 @@ export default function Home() {
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-slate-800">Generated Content</h2>
               {result && (
-                <button
-                  onClick={copyAll}
-                  className="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition"
-                >
-                  {copied === "all" ? "✓ Copied!" : "Copy All"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => exportToPDF(result.title, result.bulletPoints, result.description, formData.productName)}
+                    className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition flex items-center gap-1"
+                  >
+                    📄 PDF
+                  </button>
+                  <button
+                    onClick={() => exportToCSV(result.title, result.bulletPoints, result.description, formData.productName, formData.brandName)}
+                    className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg transition flex items-center gap-1"
+                  >
+                    📊 CSV
+                  </button>
+                  <button
+                    onClick={copyAll}
+                    className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
+                  >
+                    {copied === "all" ? "✓ Copied!" : "Copy All"}
+                  </button>
+                </div>
               )}
             </div>
 

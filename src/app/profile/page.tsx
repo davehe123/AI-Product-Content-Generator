@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { exportToPDF, exportToCSV } from "../utils/export";
 
 const WORKER_URL = "https://ai-product-content-generator-api.deforde159.workers.dev";
 
@@ -200,6 +201,16 @@ export default function Profile() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  // Helper to parse bullet points from JSON string
+  const getBullets = (bulletsStr: string | undefined): string[] => {
+    if (!bulletsStr) return [];
+    try {
+      return JSON.parse(bulletsStr);
+    } catch {
+      return [];
+    }
   };
 
   const formatTitleDate = (dateStr: string | number) => {
@@ -575,12 +586,36 @@ export default function Profile() {
             <div className="bg-white rounded-2xl p-6 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-slate-800">生成详情</h3>
-                <button
-                  onClick={() => setSelectedRecord(null)}
-                  className="text-slate-400 hover:text-slate-600 text-2xl"
-                >
-                  ×
-                </button>
+                <div className="flex items-center gap-2">
+                  {selectedRecord.generated_title && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const bullets = getBullets(selectedRecord.generated_bullets);
+                          exportToPDF(selectedRecord.generated_title || "", bullets, selectedRecord.generated_description || "", selectedRecord.product_name);
+                        }}
+                        className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+                      >
+                        📄 PDF
+                      </button>
+                      <button
+                        onClick={() => {
+                          const bullets = getBullets(selectedRecord.generated_bullets);
+                          exportToCSV(selectedRecord.generated_title || "", bullets, selectedRecord.generated_description || "", selectedRecord.product_name, selectedRecord.brand_name || "");
+                        }}
+                        className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+                      >
+                        📊 CSV
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => setSelectedRecord(null)}
+                    className="text-slate-400 hover:text-slate-600 text-2xl"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-4">
