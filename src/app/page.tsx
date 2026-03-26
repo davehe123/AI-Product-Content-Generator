@@ -480,6 +480,12 @@ export default function Home() {
                     >
                       Logout
                     </button>
+                    <a
+                      href="/profile"
+                      className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition"
+                    >
+                      👤 个人中心
+                    </a>
                   </div>
                 </div>
               ) : (
