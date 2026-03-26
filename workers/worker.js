@@ -100,7 +100,70 @@ async function getUserUsage(db, userId, tier) {
   };
 }
 
-function buildPrompt({ productName, brandName, features, audience, keywords, tone, platform, language }) {
+// 模板配置
+const CATEGORIES = {
+  electronics: {
+    name: "数码电子",
+    nameEn: "Electronics",
+    guidance: "Include key specs, compatibility info, warranty mentions. Focus on technical benefits users care about (speed, battery life, connectivity). Address common concerns like 'is it compatible with...' in bullets."
+  },
+  clothing: {
+    name: "服装配饰",
+    nameEn: "Clothing & Apparel",
+    guidance: "Emphasize material quality, fit guidance, sizing tips. Use sensory language (soft, breathable, lightweight). Include styling suggestions and occasions."
+  },
+  home: {
+    name: "家居厨房",
+    nameEn: "Home & Kitchen",
+    guidance: "Highlight durability, ease of use, space-saving benefits. Mention quality of materials (stainless steel, BPA-free, etc.). Include use cases and room compatibility."
+  },
+  beauty: {
+    name: "美妆护肤",
+    nameEn: "Beauty & Personal Care",
+    guidance: "Focus on ingredients, skin type compatibility, expected results. Use before/after language. Address safety concerns (dermatologist tested, hypoallergenic, etc.)."
+  },
+  sports: {
+    name: "运动户外",
+    nameEn: "Sports & Outdoors",
+    guidance: "Emphasize performance benefits, durability in outdoor conditions, versatility. Include skill level recommendations and use scenario specifics."
+  },
+  baby: {
+    name: "母婴玩具",
+    nameEn: "Baby & Toys",
+    guidance: "Safety is paramount - highlight certifications, age appropriateness, non-toxic materials. Focus on developmental benefits, durability, easy cleaning."
+  },
+  food: {
+    name: "食品饮料",
+    nameEn: "Food & Beverages",
+    guidance: "Emphasize taste, ingredients, health benefits, dietary compatibility (organic, gluten-free, etc.). Include serving suggestions and storage tips."
+  },
+  other: {
+    name: "其他",
+    nameEn: "General",
+    guidance: "Focus on core benefits and value proposition. Adapt language to the specific product category."
+  }
+};
+
+const STYLES = {
+  standard: {
+    name: "标准Amazon风格",
+    guidance: "Classic Amazon listing style. Professional, informative, focus on key features and benefits."
+  },
+  high_conversion: {
+    name: "高转化率",
+    guidance: "Urgency and FOMO-driven. Use power words, create sense of exclusivity, emphasize limited availability or popular demand. Stronger CTAs."
+  },
+  premium: {
+    name: "轻奢高端",
+    guidance: "Sophisticated, aspirational language. Emphasize exclusivity, quality craftsmanship, premium materials. Higher-end vocabulary and tone."
+  },
+  social: {
+    name: "社交媒体友好",
+    guidance: "Short, punchy sentences. Hashtag-friendly phrases. Shareable, viral-worthy copy. Instagram/TikTok style energy."
+  }
+};
+
+function buildPrompt({ productName, brandName, features, audience, keywords, tone, platform, language, category, style }) {
   const langMap = {
     english: { name: "English", label: "in English" },
     chinese: { name: "Chinese", label: "in Simplified Chinese (简体中文)" },
@@ -108,24 +171,41 @@ function buildPrompt({ productName, brandName, features, audience, keywords, ton
     korean: { name: "Korean", label: "in Korean (한국어)" },
   };
   const lang = langMap[language] || langMap.english;
+  const cat = CATEGORIES[category] || CATEGORIES.other;
+  const sty = STYLES[style] || STYLES.standard;
 
   return `You are an expert eCommerce copywriter specializing in Amazon product listings.
 
+## Your Specialization
+Category: ${cat.nameEn} (${cat.name})
+Style: ${sty.name}
+
+## Category-Specific Guidelines
+${cat.guidance}
+
+## Style Guidelines
+${sty.guidance}
+
+## Output Language
 Generate a high-converting product listing ${lang.label}.
 
 ## 1. Product Title (150-200 characters)
-Format: Brand + Core Keywords + Product Type + Features
+Format: Brand + Core Keywords + Product Type + Key Features
+For ${cat.nameEn}: ${cat.guidance.split('.')[0]}
 
 ## 2. Five Bullet Points
 Each includes: feature, user benefit, emotional appeal, use case
+Make bullet points ${sty.name.includes("High Conversion") ? "create urgency and highlight popularity" : "informative and benefit-driven"}
 
 ## 3. Product Description (2-3 paragraphs)
 Sales-driven language with clear CTA and natural keyword integration
+${sty.guidance}
 
-Requirements:
+## Requirements:
 - High conversion focus, highlight user benefits
 - Native ${lang.name}, follow Amazon SEO best practices
 - Output ALL content (title, bullet points, description) ${lang.label}
+- Include ${cat.nameEn}-specific optimization
 
 Input:
 Product: ${productName}
@@ -134,6 +214,8 @@ Features: ${features}
 Target Audience: ${audience || "General"}
 Core Keywords: ${keywords || "N/A"}
 Tone: ${tone}
+Category: ${cat.name}
+Style: ${sty.name}
 
 Output JSON format:
 {
@@ -340,7 +422,7 @@ export default {
 
         const generationsRes = await env.DB
           .prepare(
-            "SELECT id, created_at, product_name, brand_name, features, audience, tone, platform, generated_title, generated_bullets, generated_description, credits_used FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT id, created_at, product_name, brand_name, features, audience, tone, platform, category, style, generated_title, generated_bullets, generated_description, credits_used FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
           )
           .bind(user.id, limit, offset)
           .all();
@@ -401,12 +483,23 @@ export default {
 
       try {
         const body = await request.json();
-        const { productName, brandName, features, audience, keywords, tone, platform, language } = body;
+        const { productName, brandName, features, audience, keywords, tone, platform, language, category, style } = body;
         if (!productName || !features) {
           return Response.json({ error: "Product name and features required" }, { status: 400, headers: cors });
         }
 
-        const prompt = buildPrompt({ productName, brandName, features, audience, keywords, tone, platform, language: language || "english" });
+        const prompt = buildPrompt({
+          productName,
+          brandName,
+          features,
+          audience,
+          keywords,
+          tone,
+          platform,
+          language: language || "english",
+          category: category || "other",
+          style: style || "standard"
+        });
         const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -445,11 +538,12 @@ export default {
         // 记录历史
         await env.DB
           .prepare(
-            "INSERT INTO generations (id, user_id, product_name, brand_name, features, audience, keywords, tone, platform, generated_title, generated_bullets, generated_description, credits_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+            "INSERT INTO generations (id, user_id, product_name, brand_name, features, audience, keywords, tone, platform, category, style, generated_title, generated_bullets, generated_description, credits_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
           )
           .bind(
             crypto.randomUUID(), user.id, productName, brandName || "", features,
             audience || "", keywords || "", tone || "persuasive", platform || "amazon",
+            category || "other", style || "standard",
             result.title || "", JSON.stringify(bullets), result.description || ""
           )
           .run();
@@ -471,6 +565,22 @@ export default {
 
     if (pathname === "/plans" && request.method === "GET") {
       return Response.json({ plans: PLANS, packages: PACKAGES });
+    }
+
+    // ========== 模板配置 ==========
+
+    if (pathname === "/api/templates" && request.method === "GET") {
+      const categories = Object.entries(CATEGORIES).map(([key, val]) => ({
+        id: key,
+        name: val.name,
+        nameEn: val.nameEn
+      }));
+      const styles = Object.entries(STYLES).map(([key, val]) => ({
+        id: key,
+        name: val.name,
+        guidance: val.guidance
+      }));
+      return Response.json({ categories, styles }, { headers: corsHeaders() });
     }
 
     // ========== 模拟支付 ==========

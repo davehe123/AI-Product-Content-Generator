@@ -59,7 +59,28 @@ export default function Home() {
     tone: "persuasive",
     platform: "amazon",
     language: "english",
+    category: "other",
+    style: "standard",
   });
+
+  // 模板配置
+  const categories = [
+    { id: "electronics", name: "📱 数码电子", nameEn: "Electronics" },
+    { id: "clothing", name: "👕 服装配饰", nameEn: "Clothing" },
+    { id: "home", name: "🏠 家居厨房", nameEn: "Home & Kitchen" },
+    { id: "beauty", name: "💄 美妆护肤", nameEn: "Beauty" },
+    { id: "sports", name: "⚽ 运动户外", nameEn: "Sports" },
+    { id: "baby", name: "👶 母婴玩具", nameEn: "Baby & Toys" },
+    { id: "food", name: "🍎 食品饮料", nameEn: "Food" },
+    { id: "other", name: "📦 其他", nameEn: "Other" },
+  ];
+
+  const styles = [
+    { id: "standard", name: "📋 标准 Amazon", desc: "经典亚马逊风格" },
+    { id: "high_conversion", name: "🚀 高转化率", desc: "紧迫感/FOMO驱动" },
+    { id: "premium", name: "✨ 轻奢高端", desc: "高端大气上档次" },
+    { id: "social", name: "📱 社交媒体", desc: "短平快易传播" },
+  ];
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
@@ -715,6 +736,48 @@ export default function Home() {
                   placeholder="ice silk underwear, mens underwear"
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                 />
+              </div>
+
+              {/* 模板选择 */}
+              <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 mb-4">
+                <h3 className="text-sm font-medium text-slate-700 mb-3">🎨 生成模板</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, category: cat.id })}
+                      disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
+                      className={`p-3 rounded-lg border-2 text-left transition ${
+                        formData.category === cat.id
+                          ? "border-blue-500 bg-white shadow-md"
+                          : "border-slate-200 bg-white/50 hover:border-blue-300"
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      <p className="text-sm font-medium text-slate-800">{cat.name}</p>
+                      <p className="text-xs text-slate-400">{cat.nameEn}</p>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                  {styles.map((sty) => (
+                    <button
+                      key={sty.id}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, style: sty.id })}
+                      disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
+                      className={`p-2 rounded-lg border-2 text-left transition ${
+                        formData.style === sty.id
+                          ? "border-purple-500 bg-white shadow-md"
+                          : "border-slate-200 bg-white/50 hover:border-purple-300"
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      <p className="text-sm font-medium text-slate-800">{sty.name}</p>
+                      <p className="text-xs text-slate-400">{sty.desc}</p>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">

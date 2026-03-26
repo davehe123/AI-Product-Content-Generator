@@ -42,6 +42,8 @@ interface GenerationRecord {
   audience?: string;
   tone?: string;
   platform?: string;
+  category?: string;
+  style?: string;
   generated_title?: string;
   generated_bullets?: string;
   generated_description?: string;
@@ -592,6 +594,8 @@ export default function Profile() {
                     {selectedRecord.audience && <p><span className="text-slate-500">受众：</span>{selectedRecord.audience}</p>}
                     {selectedRecord.tone && <p><span className="text-slate-500">语气：</span>{selectedRecord.tone}</p>}
                     {selectedRecord.platform && <p><span className="text-slate-500">平台：</span>{selectedRecord.platform}</p>}
+                    {selectedRecord.category && <p><span className="text-slate-500">分类：</span>{selectedRecord.category}</p>}
+                    {selectedRecord.style && <p><span className="text-slate-500">风格：</span>{selectedRecord.style}</p>}
                   </div>
                 </div>
 
