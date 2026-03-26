@@ -38,6 +38,13 @@ interface GenerationRecord {
   created_at: string;
   product_name: string;
   brand_name: string;
+  features?: string;
+  audience?: string;
+  tone?: string;
+  platform?: string;
+  generated_title?: string;
+  generated_bullets?: string;
+  generated_description?: string;
   credits_used: number;
 }
 
@@ -54,6 +61,7 @@ export default function Profile() {
   const [historyPage, setHistoryPage] = useState(1);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<GenerationRecord | null>(null);
 
   const fetchUserData = useCallback(async (token: string) => {
     try {
@@ -177,8 +185,12 @@ export default function Profile() {
     return Math.round((user.credits_remaining / total) * 100);
   };
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+  const formatDate = (dateStr: string | number) => {
+    // Handle Unix timestamp (seconds or milliseconds)
+    const ts = typeof dateStr === "string" ? parseInt(dateStr) : dateStr;
+    // If it looks like seconds (before year 3000 in seconds), convert to ms
+    const ms = ts < 10000000000 ? ts * 1000 : ts;
+    const date = new Date(ms);
     return date.toLocaleDateString("zh-CN", {
       year: "numeric",
       month: "2-digit",
@@ -186,6 +198,19 @@ export default function Profile() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const formatTitleDate = (dateStr: string | number) => {
+    const ts = typeof dateStr === "string" ? parseInt(dateStr) : dateStr;
+    const ms = ts < 10000000000 ? ts * 1000 : ts;
+    const date = new Date(ms);
+    return date.toLocaleDateString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).replace(/\//g, "-");
   };
 
   if (loading) {
@@ -509,18 +534,20 @@ export default function Profile() {
                 {history.map((record) => (
                   <div
                     key={record.id}
-                    className="flex items-center justify-between p-4 bg-slate-50 rounded-lg"
+                    onClick={() => setSelectedRecord(record)}
+                    className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition"
                   >
                     <div className="flex-1">
                       <p className="font-medium text-slate-800">
-                        {record.brand_name ? `${record.brand_name} - ${record.product_name}` : record.product_name}
+                        {formatTitleDate(record.created_at)} / {record.product_name}
                       </p>
                       <p className="text-sm text-slate-500">{formatDate(record.created_at)}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="flex items-center gap-2">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
                         -{record.credits_used} 积分
                       </span>
+                      <span className="text-blue-500">查看 →</span>
                     </div>
                   </div>
                 ))}
@@ -539,6 +566,84 @@ export default function Profile() {
             </>
           )}
         </div>
+
+        {/* 记录详情弹窗 */}
+        {selectedRecord && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSelectedRecord(null)}>
+            <div className="bg-white rounded-2xl p-6 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-slate-800">生成详情</h3>
+                <button
+                  onClick={() => setSelectedRecord(null)}
+                  className="text-slate-400 hover:text-slate-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* 输入信息 */}
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-slate-500 mb-2">📝 输入信息</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <p><span className="text-slate-500">产品：</span>{selectedRecord.product_name}</p>
+                    {selectedRecord.brand_name && <p><span className="text-slate-500">品牌：</span>{selectedRecord.brand_name}</p>}
+                    {selectedRecord.features && <p className="col-span-2"><span className="text-slate-500">特性：</span>{selectedRecord.features}</p>}
+                    {selectedRecord.audience && <p><span className="text-slate-500">受众：</span>{selectedRecord.audience}</p>}
+                    {selectedRecord.tone && <p><span className="text-slate-500">语气：</span>{selectedRecord.tone}</p>}
+                    {selectedRecord.platform && <p><span className="text-slate-500">平台：</span>{selectedRecord.platform}</p>}
+                  </div>
+                </div>
+
+                {/* 生成的标题 */}
+                {selectedRecord.generated_title && (
+                  <div>
+                    <h4 className="text-sm font-medium text-slate-500 mb-2">✨ 标题</h4>
+                    <div className="p-3 bg-blue-50 rounded-lg text-sm text-slate-800">
+                      {selectedRecord.generated_title}
+                    </div>
+                  </div>
+                )}
+
+                {/* 生成的要点 */}
+                {selectedRecord.generated_bullets && (
+                  <div>
+                    <h4 className="text-sm font-medium text-slate-500 mb-2">📋 要点</h4>
+                    <div className="p-3 bg-blue-50 rounded-lg space-y-2">
+                      {(() => {
+                        try {
+                          const bullets = JSON.parse(selectedRecord.generated_bullets || "[]");
+                          return bullets.map((b: string, i: number) => (
+                            <div key={i} className="flex gap-2 text-sm text-slate-800">
+                              <span className="text-blue-600">•</span>
+                              <span>{b}</span>
+                            </div>
+                          ));
+                        } catch {
+                          return <p>{selectedRecord.generated_bullets}</p>;
+                        }
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* 生成的描述 */}
+                {selectedRecord.generated_description && (
+                  <div>
+                    <h4 className="text-sm font-medium text-slate-500 mb-2">📄 描述</h4>
+                    <div className="p-3 bg-blue-50 rounded-lg text-sm text-slate-800 whitespace-pre-line">
+                      {selectedRecord.generated_description}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-slate-200 text-center text-xs text-slate-400">
+                生成时间：{formatDate(selectedRecord.created_at)} · 消耗 {selectedRecord.credits_used} 积分
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-slate-500">

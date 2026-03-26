@@ -340,7 +340,7 @@ export default {
 
         const generationsRes = await env.DB
           .prepare(
-            "SELECT id, created_at, product_name, brand_name, features, audience, tone, platform, credits_used FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT id, created_at, product_name, brand_name, features, audience, tone, platform, generated_title, generated_bullets, generated_description, credits_used FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
           )
           .bind(user.id, limit, offset)
           .all();
