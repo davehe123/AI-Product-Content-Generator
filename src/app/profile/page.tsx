@@ -590,9 +590,14 @@ export default function Profile() {
                   {selectedRecord.generated_title && (
                     <>
                       <button
-                        onClick={() => {
-                          const bullets = getBullets(selectedRecord.generated_bullets);
-                          exportToPDF(selectedRecord.generated_title || "", bullets, selectedRecord.generated_description || "", selectedRecord.product_name);
+                        onClick={async () => {
+                          try {
+                            const bullets = getBullets(selectedRecord.generated_bullets);
+                            await exportToPDF(selectedRecord.generated_title || "", bullets, selectedRecord.generated_description || "", selectedRecord.product_name);
+                          } catch (err) {
+                            console.error('PDF export failed:', err);
+                            alert('PDF export failed. Please try again.');
+                          }
                         }}
                         className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition flex items-center gap-1"
                       >

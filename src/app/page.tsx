@@ -864,7 +864,14 @@ export default function Home() {
               {result && (
                 <div className="flex gap-2">
                   <button
-                    onClick={() => exportToPDF(result.title, result.bulletPoints, result.description, formData.productName)}
+                    onClick={async () => {
+                      try {
+                        await exportToPDF(result.title, result.bulletPoints, result.description, formData.productName);
+                      } catch (err) {
+                        console.error('PDF export failed:', err);
+                        alert('PDF export failed. Please try again.');
+                      }
+                    }}
                     className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition flex items-center gap-1"
                   >
                     📄 PDF
