@@ -58,6 +58,7 @@ export default function Home() {
     keywords: "",
     tone: "persuasive",
     platform: "amazon",
+    language: "english",
   });
 
   const [loading, setLoading] = useState(false);
@@ -716,7 +717,7 @@ export default function Home() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Tone</label>
                   <select
@@ -730,6 +731,22 @@ export default function Home() {
                     <option value="persuasive">Persuasive</option>
                     <option value="friendly">Friendly</option>
                     <option value="luxury">Luxury</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Output Language</label>
+                  <select
+                    name="language"
+                    value={formData.language}
+                    onChange={handleChange}
+                    disabled={!authenticated || (user?.credits_remaining ?? 0) <= 0}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="english">English</option>
+                    <option value="chinese">中文</option>
+                    <option value="japanese">日本語</option>
+                    <option value="korean">한국어</option>
                   </select>
                 </div>
 

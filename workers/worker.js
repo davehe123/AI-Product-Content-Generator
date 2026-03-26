@@ -100,10 +100,18 @@ async function getUserUsage(db, userId, tier) {
   };
 }
 
-function buildPrompt({ productName, brandName, features, audience, keywords, tone, platform }) {
+function buildPrompt({ productName, brandName, features, audience, keywords, tone, platform, language }) {
+  const langMap = {
+    english: { name: "English", label: "in English" },
+    chinese: { name: "Chinese", label: "in Simplified Chinese (简体中文)" },
+    japanese: { name: "Japanese", label: "in Japanese (日本語)" },
+    korean: { name: "Korean", label: "in Korean (한국어)" },
+  };
+  const lang = langMap[language] || langMap.english;
+
   return `You are an expert eCommerce copywriter specializing in Amazon product listings.
 
-Generate a high-converting product listing with:
+Generate a high-converting product listing ${lang.label}.
 
 ## 1. Product Title (150-200 characters)
 Format: Brand + Core Keywords + Product Type + Features
@@ -116,7 +124,8 @@ Sales-driven language with clear CTA and natural keyword integration
 
 Requirements:
 - High conversion focus, highlight user benefits
-- Native English, follow Amazon SEO best practices
+- Native ${lang.name}, follow Amazon SEO best practices
+- Output ALL content (title, bullet points, description) ${lang.label}
 
 Input:
 Product: ${productName}
@@ -308,7 +317,7 @@ export default {
       if (!user) return Response.json({ authenticated: false, user: null }, { headers: corsHeaders() });
 
       const usage = await getUserUsage(env.DB, user.id, user.subscription_plan || "free");
-      return Response.json({
+      const response = {
         authenticated: true,
         user: {
           id: user.id,
@@ -317,9 +326,29 @@ export default {
           picture: user.picture,
           subscription_plan: user.subscription_plan || "free",
           subscription_status: user.subscription_status || "active",
+          created_at: user.created_at ? new Date(user.created_at).toISOString() : null,
           ...usage,
         },
-      }, { headers: corsHeaders() });
+      };
+
+      // 如果请求带 history=true，返回生成历史
+      const url = new URL(request.url);
+      if (url.searchParams.get("history") === "true") {
+        const page = parseInt(url.searchParams.get("page") || "1");
+        const limit = parseInt(url.searchParams.get("limit") || "20");
+        const offset = (page - 1) * limit;
+
+        const generationsRes = await env.DB
+          .prepare(
+            "SELECT id, created_at, product_name, brand_name, features, audience, tone, platform, credits_used FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+          )
+          .bind(user.id, limit, offset)
+          .all();
+
+        response.generations = generationsRes.results || [];
+      }
+
+      return Response.json(response, { headers: corsHeaders() });
     }
 
     // ========== 登出 ==========
@@ -372,12 +401,12 @@ export default {
 
       try {
         const body = await request.json();
-        const { productName, brandName, features, audience, keywords, tone, platform } = body;
+        const { productName, brandName, features, audience, keywords, tone, platform, language } = body;
         if (!productName || !features) {
           return Response.json({ error: "Product name and features required" }, { status: 400, headers: cors });
         }
 
-        const prompt = buildPrompt({ productName, brandName, features, audience, keywords, tone, platform });
+        const prompt = buildPrompt({ productName, brandName, features, audience, keywords, tone, platform, language: language || "english" });
         const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
           method: "POST",
           headers: {
