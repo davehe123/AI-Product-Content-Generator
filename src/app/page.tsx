@@ -346,34 +346,117 @@ export default function Home() {
       {/* 升级弹窗 */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
-            <div className="text-center">
+          <div className="bg-white rounded-2xl p-8 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="text-center mb-6">
               <div className="text-5xl mb-4">⚡</div>
               <h2 className="text-2xl font-bold text-slate-800 mb-2">积分已用完</h2>
-              <p className="text-slate-600 mb-6">{upgradeMessage}</p>
+              <p className="text-slate-600">{upgradeMessage || "选择适合您的套餐继续使用"}</p>
+            </div>
 
-              <div className="space-y-3 mb-6">
-                <div className="bg-slate-50 rounded-lg p-4 text-left">
-                  <p className="text-sm font-medium text-slate-700 mb-2">升级到 Pro 解锁更多</p>
-                  <ul className="text-sm text-slate-600 space-y-1">
-                    <li>✅ 200 次/月</li>
-                    <li>✅ 多语言支持（英/中/日/韩）</li>
-                    <li>✅ 30天历史记录</li>
-                    <li>✅ PDF/CSV 导出</li>
+            {/* 套餐对比表 */}
+            <div className="grid md:grid-cols-2 gap-4 mb-6">
+              {[
+                {
+                  name: "Free",
+                  price: "$0",
+                  period: "永久免费",
+                  credits: "3",
+                  features: ["3 次免费生成", "基础模板", "英文支持", "社区支持"],
+                  highlight: false,
+                  cta: "当前方案",
+                },
+                {
+                  name: "Starter",
+                  price: "$5",
+                  period: "/月",
+                  credits: "60",
+                  features: ["60 积分/月", "所有基础模板", "中英双语", "Email 支持", "最近 7 天历史"],
+                  highlight: false,
+                  cta: "选择 Starter",
+                },
+                {
+                  name: "Pro",
+                  price: "$15",
+                  period: "/月",
+                  credits: "200",
+                  features: ["200 积分/月", "高级模板", "多语言支持（中/英/日/韩）", "优先 Email 支持", "30 天历史记录", "PDF 导出"],
+                  highlight: true,
+                  cta: "升级到 Pro",
+                },
+                {
+                  name: "Business",
+                  price: "$39",
+                  period: "/月",
+                  credits: "600",
+                  features: ["600 积分/月", "企业定制模板", "全语言支持", "7×24 优先支持", "90 天历史记录", "PDF/CSV 导出", "API 访问"],
+                  highlight: false,
+                  cta: "选择 Business",
+                },
+              ].map((plan) => (
+                <div
+                  key={plan.name}
+                  className={`p-5 rounded-xl border-2 ${
+                    plan.highlight
+                      ? "border-blue-500 bg-gradient-to-b from-blue-50 to-white shadow-lg relative"
+                      : "border-slate-200 hover:border-blue-300 bg-white"
+                  }`}
+                >
+                  {plan.highlight && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-xs font-medium px-3 py-1 rounded-full">
+                      推荐
+                    </div>
+                  )}
+                  <div className="text-center mb-4">
+                    <h3 className={`text-lg font-bold mb-1 ${plan.highlight ? "text-blue-600" : "text-slate-700"}`}>
+                      {plan.name}
+                    </h3>
+                    <div className="flex items-baseline justify-center gap-1">
+                      <span className="text-3xl font-bold text-slate-900">{plan.price}</span>
+                      <span className="text-slate-500">{plan.period}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-center mb-4">
+                    <div className="inline-flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1">
+                      <span className="text-lg">💰</span>
+                      <span className="font-semibold text-slate-700">{plan.credits} 积分/月</span>
+                    </div>
+                  </div>
+
+                  <ul className="space-y-2 mb-5">
+                    {plan.features.map((feature, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-sm text-slate-600">
+                        <span className="text-green-500 mt-0.5">✓</span>
+                        {feature}
+                      </li>
+                    ))}
                   </ul>
-                  <p className="text-lg font-bold text-blue-600 mt-3">$15/月</p>
-                </div>
-              </div>
 
+                  <button
+                    className={`w-full py-2.5 px-4 rounded-lg font-semibold transition ${
+                      plan.highlight
+                        ? "bg-blue-600 hover:bg-blue-700 text-white"
+                        : plan.name === "Free"
+                        ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                        : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                    }`}
+                    disabled={plan.name === "Free"}
+                    onClick={() => {
+                      if (plan.name !== "Free") {
+                        alert(`您选择了 ${plan.name} 方案，支付功能即将上线，敬请期待！`);
+                      }
+                    }}
+                  >
+                    {plan.cta}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-center">
               <button
                 onClick={() => setShowUpgradeModal(false)}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition"
-              >
-                升级到 Pro
-              </button>
-              <button
-                onClick={() => setShowUpgradeModal(false)}
-                className="w-full mt-2 text-slate-500 hover:text-slate-700 text-sm py-2"
+                className="text-slate-500 hover:text-slate-700 text-sm py-2"
               >
                 稍后再说
               </button>
