@@ -296,7 +296,8 @@ export default function Home() {
     setBuySuccess(false);
 
     try {
-      const response = await fetch(`${WORKER_URL}/api/fake-pay`, {
+      // 1. 创建 PayPal 订单
+      const createRes = await fetch(`${WORKER_URL}/api/paypal/create-order`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -305,43 +306,181 @@ export default function Home() {
         body: JSON.stringify({ package_key: packageKey }),
       });
 
-      const data = await response.json();
+      const createData = await createRes.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || "Payment failed");
+      if (!createRes.ok) {
+        throw new Error(createData.error || "Failed to create order");
       }
 
-      setBuySuccess(true);
-
-      // Update user credits
-      if (user && data.credits_remaining !== undefined) {
-        setUser({
-          ...user,
-          credits_remaining: data.credits_remaining,
-          package_remaining: data.package_remaining,
-          monthly_remaining: data.monthly_remaining,
-        });
-        localStorage.setItem("auth_user", JSON.stringify({
-          ...user,
-          credits_remaining: data.credits_remaining,
-          package_remaining: data.package_remaining,
-          monthly_remaining: data.monthly_remaining,
-        }));
-      }
-
-      // Auto close after 2 seconds
-      setTimeout(() => {
-        setShowBuyModal(false);
-        setBuySuccess(false);
-        setBuyingPackage(null);
-      }, 2000);
+      // 2. 跳转到 PayPal 授权页面
+      window.location.href = createData.approvalUrl;
 
     } catch (err) {
       setBuyError(err instanceof Error ? err.message : "Payment failed");
-    } finally {
       setBuyLoading(false);
+      setBuyingPackage(null);
     }
   };
+
+  const handleUpgradePlan = async (planKey: string) => {
+    if (!authenticated || !user) return;
+
+    try {
+      const res = await fetch(`${WORKER_URL}/api/paypal/create-subscription`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ plan_key: planKey }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert("订阅创建失败: " + (data.error || "未知错误"));
+        return;
+      }
+
+      // 跳转到 PayPal 订阅授权页面
+      window.location.href = data.approvalUrl;
+
+    } catch (err) {
+      alert("订阅创建失败: " + (err instanceof Error ? err.message : "未知错误"));
+    }
+  };
+
+  // 处理 PayPal 返回
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paypalReturn = params.get("paypal_return");
+    const paypalCancel = params.get("paypal_cancel");
+    const orderId = params.get("orderId");
+    const subscriptionReturn = params.get("subscription_return");
+    const subscriptionCancel = params.get("subscription_cancel");
+    const planKey = params.get("plan");
+    const subscriptionId = params.get("subscription_id");
+
+    if (paypalCancel === "1") {
+      window.history.replaceState({}, "", "/");
+      setShowBuyModal(false);
+      setBuyLoading(false);
+      setBuyingPackage(null);
+      return;
+    }
+
+    if (subscriptionCancel === "1") {
+      window.history.replaceState({}, "", "/");
+      setShowUpgradeModal(false);
+      return;
+    }
+
+    if (paypalReturn === "1" && orderId) {
+      (async () => {
+        setBuyLoading(true);
+        setBuyError("");
+        try {
+          const captureRes = await fetch(`${WORKER_URL}/api/paypal/capture-order`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify({ orderId }),
+          });
+
+          const captureData = await captureRes.json();
+
+          if (!captureRes.ok) {
+            throw new Error(captureData.error || "Capture failed");
+          }
+
+          setBuySuccess(true);
+
+          // 更新用户积分
+          if (user && captureData.credits_remaining !== undefined) {
+            setUser({
+              ...user,
+              credits_remaining: captureData.credits_remaining,
+              package_remaining: captureData.package_remaining,
+              monthly_remaining: captureData.monthly_remaining,
+            });
+            localStorage.setItem("auth_user", JSON.stringify({
+              ...user,
+              credits_remaining: captureData.credits_remaining,
+              package_remaining: captureData.package_remaining,
+              monthly_remaining: captureData.monthly_remaining,
+            }));
+          }
+
+          // 清理 URL 参数
+          window.history.replaceState({}, "", "/");
+
+          // 3秒后关闭弹窗
+          setTimeout(() => {
+            setShowBuyModal(false);
+            setBuySuccess(false);
+            setBuyingPackage(null);
+            setBuyLoading(false);
+          }, 3000);
+
+        } catch (err) {
+          setBuyError(err instanceof Error ? err.message : "Payment capture failed");
+          window.history.replaceState({}, "", "/");
+          setBuyLoading(false);
+        }
+      })();
+      return;
+    }
+
+    // 处理订阅返回
+    if (subscriptionReturn === "1" && planKey && subscriptionId) {
+      (async () => {
+        try {
+          const captureRes = await fetch(`${WORKER_URL}/api/paypal/capture-subscription`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify({ subscriptionId, plan_key: planKey }),
+          });
+
+          const captureData = await captureRes.json();
+
+          if (!captureRes.ok) {
+            alert("订阅激活失败: " + (captureData.error || "未知错误"));
+            window.history.replaceState({}, "", "/");
+            setShowUpgradeModal(false);
+            return;
+          }
+
+          // 更新用户信息
+          if (user) {
+            const updatedUser = {
+              ...user,
+              subscription_plan: captureData.plan,
+              monthly_credits: captureData.monthly_credits,
+              monthly_remaining: captureData.monthly_remaining,
+              credits_remaining: captureData.credits_remaining,
+            };
+            setUser(updatedUser);
+            localStorage.setItem("auth_user", JSON.stringify(updatedUser));
+          }
+
+          alert("订阅成功！您已升级到 " + planKey.toUpperCase() + " 方案");
+          window.history.replaceState({}, "", "/");
+          setShowUpgradeModal(false);
+
+        } catch (err) {
+          alert("订阅激活失败: " + (err instanceof Error ? err.message : "未知错误"));
+          window.history.replaceState({}, "", "/");
+          setShowUpgradeModal(false);
+        }
+      })();
+      return;
+    }
+  }, []);
 
   const creditPercent = () => {
     if (!user) return 0;
@@ -466,7 +605,7 @@ export default function Home() {
                     disabled={plan.name === "Free"}
                     onClick={() => {
                       if (plan.name !== "Free") {
-                        alert(`您选择了 ${plan.name} 方案，支付功能即将上线，敬请期待！`);
+                        handleUpgradePlan(plan.name.toLowerCase());
                       }
                     }}
                   >
@@ -495,7 +634,7 @@ export default function Home() {
             <div className="text-center mb-6">
               <div className="text-4xl mb-3">💰</div>
               <h2 className="text-2xl font-bold text-slate-800 mb-2">购买积分</h2>
-              <p className="text-slate-600 text-sm">选择积分包进行充值（模拟支付）</p>
+              <p className="text-slate-600 text-sm">选择积分包进行充值（PayPal 支付）</p>
             </div>
 
             {buySuccess ? (

@@ -15,6 +15,45 @@ const PACKAGES = {
   "大包": { credits: 600, price: 39 },
 };
 
+// ========== PayPal 配置 ==========
+const PAYPAL_BASE = "https://api.paypal.com";
+
+async function getPayPalAccessToken() {
+  const clientId = env.PAYPAL_CLIENT_ID;
+  const secret = env.PAYPAL_SECRET;
+  const credentials = btoa(clientId + ":" + secret);
+
+  const res = await fetch(PAYPAL_BASE + "/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Authorization": "Basic " + credentials,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error("PayPal OAuth failed: " + err);
+  }
+
+  const data = await res.json();
+  return data.access_token;
+}
+
+async function paypalApi(path, method, accessToken, body) {
+  const res = await fetch(PAYPAL_BASE + path, {
+    method,
+    headers: {
+      "Authorization": "Bearer " + accessToken,
+      "Content-Type": "application/json",
+      "PayPal-Request-Id": crypto.randomUUID(),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return res;
+}
+
 // ========== 辅助函数 ==========
 
 // 内存 session store（Cloudflare Worker 多实例不共享，但 auth callback 在同一实例走完）
@@ -632,6 +671,362 @@ export default {
         monthly_remaining: newUsage.monthly_remaining,
         credits_remaining: newUsage.credits_remaining,
       });
+    }
+
+    // ========== PayPal 支付 ==========
+
+    // POST /api/paypal/create-order — 创建 PayPal 订单，返回 approvalUrl
+    if (pathname === "/api/paypal/create-order" && request.method === "POST") {
+      const cors = corsHeaders(request.headers.get("Origin"));
+      const sessionToken = getSessionToken(request);
+      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401, headers: cors });
+
+      const user = await env.DB
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
+        .first();
+      if (!user) return Response.json({ error: "User not found" }, { status: 404, headers: cors });
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400, headers: cors });
+      }
+
+      const { package_key } = body;
+      if (!package_key || !PACKAGES[package_key]) {
+        return Response.json({ error: "Invalid package" }, { status: 400, headers: cors });
+      }
+
+      const pkg = PACKAGES[package_key];
+
+      try {
+        const accessToken = await getPayPalAccessToken();
+
+        const orderRes = await paypalApi("/v2/checkout/orders", "POST", accessToken, {
+          intent: "CAPTURE",
+          purchase_units: [{
+            reference_id: "pkg_" + package_key + "_" + user.id,
+            description: "AI Product Content Generator - " + package_key + " (" + pkg.credits + " credits)",
+            amount: {
+              currency_code: "USD",
+              value: pkg.price.toFixed(2),
+            },
+          }],
+          application_context: {
+            brand_name: "AI Product Content Generator",
+            landing_page: "BILLING",
+            user_action: "PAY_NOW",
+            return_url: FRONTEND_URL + "/?paypal_return=1&orderId=" + orderData.id,
+            cancel_url: FRONTEND_URL + "/?paypal_cancel=1",
+          },
+        });
+
+        const orderData = await orderRes.json();
+
+        if (!orderRes.ok) {
+          console.error("PayPal create order error:", JSON.stringify(orderData));
+          return Response.json({ error: "PayPal order creation failed" }, { status: 500, headers: cors });
+        }
+
+        // 找到 approval URL
+        const approvalUrl = orderData.links?.find((l) => l.rel === "approve")?.href;
+        if (!approvalUrl) {
+          return Response.json({ error: "No approval URL from PayPal" }, { status: 500, headers: cors });
+        }
+
+        return Response.json({
+          orderId: orderData.id,
+          approvalUrl,
+        }, { headers: cors });
+
+      } catch (err) {
+        console.error("PayPal error:", err.message);
+        return Response.json({ error: err.message || "PayPal error" }, { status: 500, headers: cors });
+      }
+    }
+
+    // POST /api/paypal/capture-order — 捕获 PayPal 订单（用户从 PayPal 返回后前端调用）
+    if (pathname === "/api/paypal/capture-order" && request.method === "POST") {
+      const cors = corsHeaders(request.headers.get("Origin"));
+      const sessionToken = getSessionToken(request);
+      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401, headers: cors });
+
+      const user = await env.DB
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
+        .first();
+      if (!user) return Response.json({ error: "User not found" }, { status: 404, headers: cors });
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400, headers: cors });
+      }
+
+      const { orderId } = body;
+      if (!orderId) {
+        return Response.json({ error: "orderId required" }, { status: 400, headers: cors });
+      }
+
+      try {
+        const accessToken = await getPayPalAccessToken();
+
+        // 捕获订单
+        const captureRes = await paypalApi("/v2/checkout/orders/" + orderId + "/capture", "POST", accessToken);
+        const captureData = await captureRes.json();
+
+        if (!captureRes.ok) {
+          console.error("PayPal capture error:", JSON.stringify(captureData));
+          return Response.json({ error: "Payment capture failed" }, { status: 500, headers: cors });
+        }
+
+        // 检查支付状态
+        if (captureData.status !== "COMPLETED") {
+          return Response.json({ error: "Payment not completed: " + captureData.status }, { status: 400, headers: cors });
+        }
+
+        // 从 reference_id 解析 package_key 和 user_id
+        const refId = captureData.purchase_units?.[0]?.reference_id || "";
+        const match = refId.match(/^pkg_(.+)_(.+)$/);
+        if (!match || match[2] !== user.id) {
+          return Response.json({ error: "Package mismatch" }, { status: 400, headers: cors });
+        }
+
+        const package_key = match[1];
+        if (!PACKAGES[package_key]) {
+          return Response.json({ error: "Invalid package" }, { status: 400, headers: cors });
+        }
+
+        const pkg = PACKAGES[package_key];
+
+        // 记录购买交易
+        await env.DB
+          .prepare(
+            "INSERT INTO transactions (id, user_id, type, description, credits_added) VALUES (?, ?, 'package', ?, ?)"
+          )
+          .bind(crypto.randomUUID(), user.id, `PayPal ${package_key}`, pkg.credits)
+          .run();
+
+        const newUsage = await getUserUsage(env.DB, user.id, user.subscription_plan || "free");
+
+        return Response.json({
+          success: true,
+          package: package_key,
+          credits_added: pkg.credits,
+          new_balance: newUsage.credits_remaining,
+          package_remaining: newUsage.package_remaining,
+          monthly_remaining: newUsage.monthly_remaining,
+          credits_remaining: newUsage.credits_remaining,
+        }, { headers: cors });
+
+      } catch (err) {
+        console.error("PayPal capture error:", err.message);
+        return Response.json({ error: err.message || "Capture failed" }, { status: 500, headers: cors });
+      }
+    }
+
+    // ========== PayPal 订阅 ==========
+
+    // POST /api/paypal/create-subscription — 创建月度订阅
+    if (pathname === "/api/paypal/create-subscription" && request.method === "POST") {
+      const cors = corsHeaders(request.headers.get("Origin"));
+      const sessionToken = getSessionToken(request);
+      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401, headers: cors });
+
+      const user = await env.DB
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
+        .first();
+      if (!user) return Response.json({ error: "User not found" }, { status: 404, headers: cors });
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400, headers: cors });
+      }
+
+      const { plan_key } = body;
+      if (!plan_key || !PLANS[plan_key] || PLANS[plan_key].price === 0) {
+        return Response.json({ error: "Invalid plan" }, { status: 400, headers: cors });
+      }
+
+      const plan = PLANS[plan_key];
+
+      try {
+        const accessToken = await getPayPalAccessToken();
+
+        // 创建 product
+        const productRes = await paypalApi("/v1/catalogs/products", "POST", accessToken, {
+          name: "AI Product Content Generator - " + plan.name,
+          description: "Monthly subscription - " + plan.name + " Plan",
+          type: "SERVICE",
+        });
+        const productData = await productRes.json();
+        if (!productRes.ok) {
+          console.error("PayPal create product error:", JSON.stringify(productData));
+          return Response.json({ error: "Failed to create product" }, { status: 500, headers: cors });
+        }
+        const productId = productData.id;
+
+        // 创建 billing plan
+        const billingPlanRes = await paypalApi("/v1/billing/plans", "POST", accessToken, {
+          name: plan.name + " Monthly Plan",
+          description: plan.name + " Plan - Monthly subscription - " + plan.monthly_credits + " credits/month",
+          type: "INFINITE",
+          payment_definitions: [{
+            name: "Monthly Subscription",
+            type: "REGULAR",
+            frequency: "MONTH",
+            frequency_interval: "1",
+            amount: {
+              currency_code: "USD",
+              value: plan.price.toFixed(2),
+            },
+            cycles: "0",
+          }],
+          application_context: {
+            brand_name: "AI Product Content Generator",
+            subscription_plan_url: "https://ai-product-content-generator.pages.dev",
+            user_action: "SUBSCRIBE_NOW",
+            return_url: FRONTEND_URL + "/?subscription_return=1&plan=" + plan_key,
+            cancel_url: FRONTEND_URL + "/?subscription_cancel=1",
+          },
+        });
+        const billingPlanData = await billingPlanRes.json();
+        if (!billingPlanRes.ok) {
+          console.error("PayPal create plan error:", JSON.stringify(billingPlanData));
+          return Response.json({ error: "Failed to create billing plan" }, { status: 500, headers: cors });
+        }
+        const billingPlanId = billingPlanData.id;
+
+        // 激活 plan（不激活无法订阅）
+        const activateRes = await paypalApi("/v1/billing/plans/" + billingPlanId + "/activate", "POST", accessToken);
+        if (!activateRes.ok) {
+          console.error("PayPal activate plan error:", await activateRes.text());
+          return Response.json({ error: "Failed to activate plan" }, { status: 500, headers: cors });
+        }
+
+        // 创建订阅
+        const subRes = await paypalApi("/v1/billing/subscriptions", "POST", accessToken, {
+          plan_id: billingPlanId,
+          subscriber: {
+            email_address: user.email,
+          },
+          custom_id: "sub_" + plan_key + "_" + user.id,
+          application_context: {
+            brand_name: "AI Product Content Generator",
+            user_action: "SUBSCRIBE_NOW",
+            return_url: FRONTEND_URL + "/?subscription_return=1&plan=" + plan_key,
+            cancel_url: FRONTEND_URL + "/?subscription_cancel=1",
+          },
+        });
+        const subData = await subRes.json();
+
+        if (!subRes.ok) {
+          console.error("PayPal create subscription error:", JSON.stringify(subData));
+          return Response.json({ error: "Failed to create subscription" }, { status: 500, headers: cors });
+        }
+
+        // 找到 approval URL
+        const approvalUrl = subData.links?.find((l) => l.rel === "approve")?.href;
+        if (!approvalUrl) {
+          return Response.json({ error: "No approval URL from PayPal" }, { status: 500, headers: cors });
+        }
+
+        return Response.json({
+          subscriptionId: subData.id,
+          approvalUrl,
+        }, { headers: cors });
+
+      } catch (err) {
+        console.error("PayPal subscription error:", err.message);
+        return Response.json({ error: err.message || "Subscription error" }, { status: 500, headers: cors });
+      }
+    }
+
+    // POST /api/paypal/capture-subscription — 捕获订阅（用户从 PayPal 返回后前端调用）
+    if (pathname === "/api/paypal/capture-subscription" && request.method === "POST") {
+      const cors = corsHeaders(request.headers.get("Origin"));
+      const sessionToken = getSessionToken(request);
+      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401, headers: cors });
+
+      const user = await env.DB
+        .prepare("SELECT * FROM users WHERE session_token = ?")
+        .bind(sessionToken)
+        .first();
+      if (!user) return Response.json({ error: "User not found" }, { status: 404, headers: cors });
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400, headers: cors });
+      }
+
+      const { subscriptionId, plan_key } = body;
+      if (!subscriptionId || !plan_key) {
+        return Response.json({ error: "subscriptionId and plan_key required" }, { status: 400, headers: cors });
+      }
+
+      if (!PLANS[plan_key] || PLANS[plan_key].price === 0) {
+        return Response.json({ error: "Invalid plan" }, { status: 400, headers: cors });
+      }
+
+      try {
+        const accessToken = await getPayPalAccessToken();
+
+        // 查询订阅状态
+        const subRes = await paypalApi("/v1/billing/subscriptions/" + subscriptionId, "GET", accessToken);
+        const subData = await subRes.json();
+
+        if (!subRes.ok) {
+          console.error("PayPal get subscription error:", JSON.stringify(subData));
+          return Response.json({ error: "Failed to get subscription" }, { status: 500, headers: cors });
+        }
+
+        // 检查 custom_id 防伪校验
+        const expectedCustomId = "sub_" + plan_key + "_" + user.id;
+        if (subData.custom_id !== expectedCustomId) {
+          return Response.json({ error: "Subscription mismatch" }, { status: 400, headers: cors });
+        }
+
+        // 检查状态
+        if (!["ACTIVE", "APPROVED", "ACTIVATED"].includes(subData.status)) {
+          return Response.json({ error: "Subscription not active: " + subData.status }, { status: 400, headers: cors });
+        }
+
+        // 更新用户套餐
+        await env.DB
+          .prepare("UPDATE users SET subscription_plan = ? WHERE id = ?")
+          .bind(plan_key, user.id)
+          .run();
+
+        // 记录首月订阅交易
+        await env.DB
+          .prepare(
+            "INSERT INTO transactions (id, user_id, type, description, credits_added) VALUES (?, ?, 'subscription', ?, ?)"
+          )
+          .bind(crypto.randomUUID(), user.id, `PayPal ${plan_key} 订阅激活`, PLANS[plan_key].monthly_credits)
+          .run();
+
+        const newUsage = await getUserUsage(env.DB, user.id, plan_key);
+
+        return Response.json({
+          success: true,
+          plan: plan_key,
+          monthly_credits: newUsage.monthly_credits,
+          monthly_remaining: newUsage.monthly_remaining,
+          credits_remaining: newUsage.credits_remaining,
+        }, { headers: cors });
+
+      } catch (err) {
+        console.error("PayPal capture subscription error:", err.message);
+        return Response.json({ error: err.message || "Capture failed" }, { status: 500, headers: cors });
+      }
     }
 
     // ========== 测试 D1 ==========
