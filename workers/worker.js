@@ -16,7 +16,7 @@ const PACKAGES = {
 };
 
 // ========== PayPal 配置 ==========
-const PAYPAL_BASE = "https://api.paypal.com";
+const PAYPAL_BASE = "https://api-m.sandbox.paypal.com";
 
 async function getPayPalAccessToken() {
   const clientId = env.PAYPAL_CLIENT_ID;
@@ -892,8 +892,8 @@ export default {
             brand_name: "AI Product Content Generator",
             subscription_plan_url: "https://ai-product-content-generator.pages.dev",
             user_action: "SUBSCRIBE_NOW",
-            return_url: FRONTEND_URL + "/?subscription_return=1&plan=" + plan_key,
-            cancel_url: FRONTEND_URL + "/?subscription_cancel=1",
+            return_url: FRONTEND_URL + "/profile?subscription_return=1&plan=" + plan_key,
+            cancel_url: FRONTEND_URL + "/profile?subscription_cancel=1",
           },
         });
         const billingPlanData = await billingPlanRes.json();
@@ -920,8 +920,8 @@ export default {
           application_context: {
             brand_name: "AI Product Content Generator",
             user_action: "SUBSCRIBE_NOW",
-            return_url: FRONTEND_URL + "/?subscription_return=1&plan=" + plan_key,
-            cancel_url: FRONTEND_URL + "/?subscription_cancel=1",
+            return_url: FRONTEND_URL + "/profile?subscription_return=1&plan=" + plan_key,
+            cancel_url: FRONTEND_URL + "/profile?subscription_cancel=1",
           },
         });
         const subData = await subRes.json();
@@ -1026,6 +1026,34 @@ export default {
       } catch (err) {
         console.error("PayPal capture subscription error:", err.message);
         return Response.json({ error: err.message || "Capture failed" }, { status: 500, headers: cors });
+      }
+    }
+
+    // POST /api/paypal/webhook — 接收 PayPal Webhook 事件
+    if (pathname === "/api/paypal/webhook" && request.method === "POST") {
+      const cors = corsHeaders(request.headers.get("Origin"));
+      const body = await request.text();
+      const headers = {};
+      request.headers.forEach((v, k) => headers[k] = v);
+
+      // 验证 webhook 签名（生产环境必须，测试环境可跳过）
+      // 这里先 log 原始事件，实际生产需要验证 webhook id
+      console.log("PayPal webhook received:", headers["paypal-transmission-id"], body);
+
+      try {
+        const event = JSON.parse(body);
+        console.log("Webhook event type:", event.event_type);
+
+        // 订阅相关事件处理（后续扩展）
+        if (event.event_type === "BILLING.SUBSCRIPTION.ACTIVATED") {
+          // 订阅激活
+        } else if (event.event_type === "BILLING.SUBSCRIPTION.CANCELLED") {
+          // 订阅取消
+        }
+
+        return Response.json({ received: true }, { headers: cors });
+      } catch (err) {
+        return Response.json({ error: err.message }, { status: 400, headers: cors });
       }
     }
 

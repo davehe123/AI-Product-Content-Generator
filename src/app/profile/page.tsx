@@ -135,6 +135,100 @@ export default function Profile() {
     }
   }, []);
 
+  // 处理 PayPal 订阅返回
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const subscriptionReturn = params.get("subscription_return");
+    const subscriptionCancel = params.get("subscription_cancel");
+    const planKey = params.get("plan");
+    const subscriptionId = params.get("subscription_id");
+
+    if (subscriptionCancel === "1") {
+      window.history.replaceState({}, "", "/profile");
+      setShowUpgradeModal(false);
+      return;
+    }
+
+    if (subscriptionReturn === "1" && planKey && subscriptionId) {
+      (async () => {
+        try {
+          const captureRes = await fetch(`${WORKER_URL}/api/paypal/capture-subscription`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify({ subscriptionId, plan_key: planKey }),
+          });
+
+          const captureData = await captureRes.json();
+
+          if (!captureRes.ok) {
+            alert("订阅激活失败: " + (captureData.error || "未知错误"));
+            window.history.replaceState({}, "", "/profile");
+            setShowUpgradeModal(false);
+            return;
+          }
+
+          // 更新用户信息
+          if (user) {
+            const updatedUser = {
+              ...user,
+              subscription_plan: captureData.plan,
+              monthly_credits: captureData.monthly_credits,
+              monthly_remaining: captureData.monthly_remaining,
+              credits_remaining: captureData.credits_remaining,
+            };
+            setUser(updatedUser);
+            localStorage.setItem("auth_user", JSON.stringify(updatedUser));
+          }
+
+          alert("订阅成功！您已升级到 " + planKey.toUpperCase() + " 方案");
+          window.history.replaceState({}, "", "/profile");
+          setShowUpgradeModal(false);
+
+          // 刷新用户数据
+          const token = localStorage.getItem("auth_token");
+          if (token) fetchUserData(token);
+
+        } catch (err) {
+          alert("订阅激活失败: " + (err instanceof Error ? err.message : "未知错误"));
+          window.history.replaceState({}, "", "/profile");
+          setShowUpgradeModal(false);
+        }
+      })();
+    }
+  }, [user, fetchUserData]);
+
+  const handleUpgradePlan = async (planKey: string) => {
+    if (!authenticated || !user) return;
+
+    try {
+      const res = await fetch(`${WORKER_URL}/api/paypal/create-subscription`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ plan_key: planKey }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert("订阅创建失败: " + (data.error || "未知错误"));
+        return;
+      }
+
+      // 跳转到 PayPal 订阅授权页面
+      // eslint-disable-next-line react-hooks/immutability
+      window.location.href = data.approvalUrl;
+
+    } catch (err) {
+      alert("订阅创建失败: " + (err instanceof Error ? err.message : "未知错误"));
+    }
+  };
+
   const handleLogin = () => {
     const frontendUrl = window.location.origin;
     const popup = window.open(
@@ -366,7 +460,7 @@ export default function Profile() {
                     disabled={plan.name === "Free"}
                     onClick={() => {
                       if (plan.name !== "Free") {
-                        alert(`您选择了 ${plan.name} 方案，支付功能即将上线，敬请期待！`);
+                        handleUpgradePlan(plan.name.toLowerCase());
                       }
                     }}
                   >
