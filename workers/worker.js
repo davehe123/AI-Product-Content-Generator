@@ -18,7 +18,7 @@ const PACKAGES = {
 // ========== PayPal 配置 ==========
 const PAYPAL_BASE = "https://api-m.sandbox.paypal.com";
 
-async function getPayPalAccessToken() {
+async function getPayPalAccessToken(env) {
   const clientId = env.PAYPAL_CLIENT_ID;
   const secret = env.PAYPAL_SECRET;
   const credentials = btoa(clientId + ":" + secret);
@@ -702,7 +702,7 @@ export default {
       const pkg = PACKAGES[package_key];
 
       try {
-        const accessToken = await getPayPalAccessToken();
+        const accessToken = await getPayPalAccessToken(env);
 
         const orderRes = await paypalApi("/v2/checkout/orders", "POST", accessToken, {
           intent: "CAPTURE",
@@ -772,7 +772,7 @@ export default {
       }
 
       try {
-        const accessToken = await getPayPalAccessToken();
+        const accessToken = await getPayPalAccessToken(env);
 
         // 捕获订单
         const captureRes = await paypalApi("/v2/checkout/orders/" + orderId + "/capture", "POST", accessToken);
@@ -857,7 +857,7 @@ export default {
       const plan = PLANS[plan_key];
 
       try {
-        const accessToken = await getPayPalAccessToken();
+        const accessToken = await getPayPalAccessToken(env);
 
         // 创建 product
         const productRes = await paypalApi("/v1/catalogs/products", "POST", accessToken, {
@@ -977,7 +977,7 @@ export default {
       }
 
       try {
-        const accessToken = await getPayPalAccessToken();
+        const accessToken = await getPayPalAccessToken(env);
 
         // 查询订阅状态
         const subRes = await paypalApi("/v1/billing/subscriptions/" + subscriptionId, "GET", accessToken);
