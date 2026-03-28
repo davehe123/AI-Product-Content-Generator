@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { exportToPDF, exportToCSV } from "../utils/export";
 
 const WORKER_URL = "https://ai-product-content-generator-api.deforde159.workers.dev";
@@ -56,7 +57,7 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export default function Profile() {
+function ProfileContent() {
   const [user, setUser] = useState<User | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -65,6 +66,7 @@ export default function Profile() {
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<GenerationRecord | null>(null);
+  const searchParams = useSearchParams();
 
   const fetchUserData = useCallback(async (token: string) => {
     try {
@@ -125,23 +127,13 @@ export default function Profile() {
     initAuth();
   }, [fetchUserData, fetchHistory]);
 
-  // Check for upgrade modal trigger (separate effect to avoid cascading renders)
+  // 处理 PayPal 订阅返回 + upgrade 触发
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("upgrade") === "true") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setShowUpgradeModal(true);
-      window.history.replaceState({}, "", "/profile");
-    }
-  }, []);
-
-  // 处理 PayPal 订阅返回
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const subscriptionReturn = params.get("subscription_return");
-    const subscriptionCancel = params.get("subscription_cancel");
-    const planKey = params.get("plan");
-    const subscriptionId = params.get("subscription_id");
+    const subscriptionReturn = searchParams.get("subscription_return");
+    const subscriptionCancel = searchParams.get("subscription_cancel");
+    const planKey = searchParams.get("plan");
+    const subscriptionId = searchParams.get("subscription_id");
+    const upgrade = searchParams.get("upgrade");
 
     if (subscriptionCancel === "1") {
       window.history.replaceState({}, "", "/profile");
@@ -149,14 +141,26 @@ export default function Profile() {
       return;
     }
 
+    if (upgrade === "true") {
+      window.history.replaceState({}, "", "/profile");
+      setShowUpgradeModal(true);
+    }
+
     if (subscriptionReturn === "1" && planKey && subscriptionId) {
+      const token = localStorage.getItem("auth_token");
+      if (!token) {
+        alert("请重新登录后再试");
+        window.history.replaceState({}, "", "/profile");
+        return;
+      }
+
       (async () => {
         try {
           const captureRes = await fetch(`${WORKER_URL}/api/paypal/capture-subscription`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...getAuthHeaders(),
+              Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({ subscriptionId, plan_key: planKey }),
           });
@@ -171,9 +175,11 @@ export default function Profile() {
           }
 
           // 更新用户信息
-          if (user) {
+          const storedUser = localStorage.getItem("auth_user");
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser);
             const updatedUser = {
-              ...user,
+              ...parsedUser,
               subscription_plan: captureData.plan,
               monthly_credits: captureData.monthly_credits,
               monthly_remaining: captureData.monthly_remaining,
@@ -188,7 +194,6 @@ export default function Profile() {
           setShowUpgradeModal(false);
 
           // 刷新用户数据
-          const token = localStorage.getItem("auth_token");
           if (token) fetchUserData(token);
 
         } catch (err) {
@@ -198,7 +203,8 @@ export default function Profile() {
         }
       })();
     }
-  }, [user, fetchUserData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, fetchUserData]);
 
   const handleUpgradePlan = async (planKey: string) => {
     if (!authenticated || !user) return;
@@ -789,5 +795,13 @@ export default function Profile() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Profile() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="text-slate-500">Loading...</div></div>}>
+      <ProfileContent />
+    </Suspense>
   );
 }

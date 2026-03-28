@@ -874,6 +874,7 @@ export default {
 
         // 创建 billing plan
         const billingPlanRes = await paypalApi("/v1/billing/plans", "POST", accessToken, {
+          product_id: productId,
           name: plan.name + " Monthly Plan",
           description: plan.name + " Plan - Monthly subscription - " + plan.monthly_credits + " credits/month",
           type: "INFINITE",
@@ -881,17 +882,30 @@ export default {
             name: "Monthly Subscription",
             type: "REGULAR",
             frequency: "MONTH",
-            frequency_interval: "1",
+            frequency_interval: 1,
             amount: {
               currency_code: "USD",
               value: plan.price.toFixed(2),
             },
-            cycles: "0",
           }],
-          application_context: {
-            brand_name: "AI Product Content Generator",
-            subscription_plan_url: "https://ai-product-content-generator.pages.dev",
-            user_action: "SUBSCRIBE_NOW",
+          billing_cycles: [{
+            frequency: {
+              interval_unit: "MONTH",
+              interval_count: 1,
+            },
+            tenure_type: "REGULAR",
+            sequence: 1,
+            total_cycles: 0,
+            pricing_scheme: {
+              fixed_price: {
+                value: plan.price.toFixed(2),
+                currency_code: "USD",
+              },
+            },
+          }],
+          payment_preferences: {
+            auto_bill_amount: "YES",
+            initial_fail_action: "CONTINUE",
             return_url: FRONTEND_URL + "/profile?subscription_return=1&plan=" + plan_key,
             cancel_url: FRONTEND_URL + "/profile?subscription_cancel=1",
           },
@@ -899,15 +913,17 @@ export default {
         const billingPlanData = await billingPlanRes.json();
         if (!billingPlanRes.ok) {
           console.error("PayPal create plan error:", JSON.stringify(billingPlanData));
-          return Response.json({ error: "Failed to create billing plan" }, { status: 500, headers: cors });
+          return Response.json({ error: "Failed to create billing plan: " + JSON.stringify(billingPlanData) }, { status: 500, headers: cors });
         }
         const billingPlanId = billingPlanData.id;
 
-        // 激活 plan（不激活无法订阅）
-        const activateRes = await paypalApi("/v1/billing/plans/" + billingPlanId + "/activate", "POST", accessToken);
-        if (!activateRes.ok) {
-          console.error("PayPal activate plan error:", await activateRes.text());
-          return Response.json({ error: "Failed to activate plan" }, { status: 500, headers: cors });
+        // 如果 plan 状态不是 ACTIVE，则激活
+        if (billingPlanData.status !== "ACTIVE") {
+          const activateRes = await paypalApi("/v1/billing/plans/" + billingPlanId + "/activate", "POST", accessToken);
+          if (!activateRes.ok) {
+            console.error("PayPal activate plan error:", await activateRes.text());
+            return Response.json({ error: "Failed to activate plan" }, { status: 500, headers: cors });
+          }
         }
 
         // 创建订阅
