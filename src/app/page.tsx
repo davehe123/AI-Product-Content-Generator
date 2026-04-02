@@ -44,6 +44,13 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// 从 Cookie 中读取 session_token 作为 localStorage 的备份
+function getSessionTokenFromCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/session_token=([^;]+)/);
+  return match ? match[1] : null;
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
@@ -303,7 +310,7 @@ export default function Home() {
           "Content-Type": "application/json",
           ...getAuthHeaders(),
         },
-        body: JSON.stringify({ package_key: packageKey }),
+        body: JSON.stringify({ package_key: packageKey, frontend_url: window.location.origin }),
       });
 
       const createData = await createRes.json();
@@ -332,7 +339,7 @@ export default function Home() {
           "Content-Type": "application/json",
           ...getAuthHeaders(),
         },
-        body: JSON.stringify({ plan_key: planKey }),
+        body: JSON.stringify({ plan_key: planKey, frontend_url: window.location.origin }),
       });
 
       const data = await res.json();
@@ -375,7 +382,10 @@ export default function Home() {
       return;
     }
 
-    if (paypalReturn === "1" && orderId) {
+    // PayPal Checkout redirects with token=ORDER_ID (not orderId)
+    const effectiveOrderId = orderId || params.get("token");
+
+    if (paypalReturn === "1" && effectiveOrderId) {
       (async () => {
         setBuyLoading(true);
         setBuyError("");
@@ -386,7 +396,7 @@ export default function Home() {
               "Content-Type": "application/json",
               ...getAuthHeaders(),
             },
-            body: JSON.stringify({ orderId }),
+            body: JSON.stringify({ orderId: effectiveOrderId }),
           });
 
           const captureData = await captureRes.json();
@@ -397,21 +407,8 @@ export default function Home() {
 
           setBuySuccess(true);
 
-          // 更新用户积分
-          if (user && captureData.credits_remaining !== undefined) {
-            setUser({
-              ...user,
-              credits_remaining: captureData.credits_remaining,
-              package_remaining: captureData.package_remaining,
-              monthly_remaining: captureData.monthly_remaining,
-            });
-            localStorage.setItem("auth_user", JSON.stringify({
-              ...user,
-              credits_remaining: captureData.credits_remaining,
-              package_remaining: captureData.package_remaining,
-              monthly_remaining: captureData.monthly_remaining,
-            }));
-          }
+          // 从服务器重新获取用户数据确保积分刷新
+          await checkAuth();
 
           // 清理 URL 参数
           window.history.replaceState({}, "", "/");
@@ -433,8 +430,11 @@ export default function Home() {
       return;
     }
 
+    // 处理订阅返回 - PayPal may redirect with token=subscriptionId or our custom subscription_id param
+    const effectiveSubscriptionId = subscriptionId || params.get("token");
+
     // 处理订阅返回
-    if (subscriptionReturn === "1" && planKey && subscriptionId) {
+    if (subscriptionReturn === "1" && planKey && effectiveSubscriptionId) {
       (async () => {
         try {
           const captureRes = await fetch(`${WORKER_URL}/api/paypal/capture-subscription`, {
@@ -443,7 +443,7 @@ export default function Home() {
               "Content-Type": "application/json",
               ...getAuthHeaders(),
             },
-            body: JSON.stringify({ subscriptionId, plan_key: planKey }),
+            body: JSON.stringify({ subscriptionId: effectiveSubscriptionId, plan_key: planKey }),
           });
 
           const captureData = await captureRes.json();
@@ -455,18 +455,8 @@ export default function Home() {
             return;
           }
 
-          // 更新用户信息
-          if (user) {
-            const updatedUser = {
-              ...user,
-              subscription_plan: captureData.plan,
-              monthly_credits: captureData.monthly_credits,
-              monthly_remaining: captureData.monthly_remaining,
-              credits_remaining: captureData.credits_remaining,
-            };
-            setUser(updatedUser);
-            localStorage.setItem("auth_user", JSON.stringify(updatedUser));
-          }
+          // 从服务器重新获取用户数据确保积分刷新
+          await checkAuth();
 
           alert("订阅成功！您已升级到 " + planKey.toUpperCase() + " 方案");
           window.history.replaceState({}, "", "/");

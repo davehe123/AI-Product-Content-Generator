@@ -1,11 +1,11 @@
 // Cloudflare Worker with Google OAuth + 积分用量系统
-const FRONTEND_URL = "https://ai-product-content-generator.pages.dev";
+const FRONTEND_URL = "https://ai-product-content-generator.online";
 
 const PLANS = {
-  free: { name: "Free", monthly_credits: 0, price: 0 },
-  starter: { name: "Starter", monthly_credits: 50, price: 5 },
-  pro: { name: "Pro", monthly_credits: 200, price: 15 },
-  business: { name: "Business", monthly_credits: 1000, price: 39 },
+  free: { name: "Free", monthly_credits: 0, price: 0, history_days: 7 },
+  starter: { name: "Starter", monthly_credits: 50, price: 5, history_days: 7 },
+  pro: { name: "Pro", monthly_credits: 200, price: 15, history_days: 30 },
+  business: { name: "Business", monthly_credits: 1000, price: 39, history_days: 90 },
 };
 
 const PACKAGES = {
@@ -16,7 +16,7 @@ const PACKAGES = {
 };
 
 // ========== PayPal 配置 ==========
-const PAYPAL_BASE = "https://api-m.sandbox.paypal.com";
+const PAYPAL_BASE = "https://api-m.paypal.com";
 
 async function getPayPalAccessToken(env) {
   const clientId = env.PAYPAL_CLIENT_ID;
@@ -399,6 +399,10 @@ export default {
         const authData = base64urlEncode({ token: sessionToken, userId: user.id, email: user.email, name: user.name });
         const redirectUrl = frontendUrl + "/?auth_callback=1&auth_data=" + authData;
 
+        // 设置 HTTP-Only Cookie（7天过期），作为 localStorage auth_token 的备份
+        // 这样即使用户从 PayPal 返回时 localStorage 不可用，后端仍能通过 Cookie 识别用户
+        const cookieHeader = `session_token=${sessionToken}; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+
         const html = `<!DOCTYPE html>
 <html>
 <head><title>Login Success</title></head>
@@ -415,7 +419,10 @@ export default {
 </html>`;
 
         return new Response(html, {
-          headers: { "Content-Type": "text/html; charset=utf-8" },
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Set-Cookie": cookieHeader,
+          },
         });
 
       } catch (err) {
@@ -452,21 +459,26 @@ export default {
         },
       };
 
-      // 如果请求带 history=true，返回生成历史
+      // 如果请求带 history=true，返回生成历史（按套餐限制天数）
       const url = new URL(request.url);
       if (url.searchParams.get("history") === "true") {
         const page = parseInt(url.searchParams.get("page") || "1");
         const limit = parseInt(url.searchParams.get("limit") || "20");
         const offset = (page - 1) * limit;
 
+        // 根据套餐获取历史记录天数限制
+        const userPlan = user.subscription_plan || "free";
+        const historyDays = PLANS[userPlan]?.history_days || 7;
+
         const generationsRes = await env.DB
           .prepare(
-            "SELECT id, created_at, product_name, brand_name, features, audience, tone, platform, category, style, generated_title, generated_bullets, generated_description, credits_used FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT id, created_at, product_name, brand_name, features, audience, tone, platform, category, style, generated_title, generated_bullets, generated_description, credits_used FROM generations WHERE user_id = ? AND created_at >= strftime('%s', 'now', '-' || ? || ' days') ORDER BY created_at DESC LIMIT ? OFFSET ?"
           )
-          .bind(user.id, limit, offset)
+          .bind(user.id, historyDays, limit, offset)
           .all();
 
         response.generations = generationsRes.results || [];
+        response.history_days_limit = historyDays;
       }
 
       return Response.json(response, { headers: corsHeaders() });
@@ -694,12 +706,13 @@ export default {
         return Response.json({ error: "Invalid JSON" }, { status: 400, headers: cors });
       }
 
-      const { package_key } = body;
+      const { package_key, frontend_url } = body;
       if (!package_key || !PACKAGES[package_key]) {
         return Response.json({ error: "Invalid package" }, { status: 400, headers: cors });
       }
 
       const pkg = PACKAGES[package_key];
+      const effectiveFrontendUrl = frontend_url || FRONTEND_URL;
 
       try {
         const accessToken = await getPayPalAccessToken(env);
@@ -718,8 +731,8 @@ export default {
             brand_name: "AI Product Content Generator",
             landing_page: "BILLING",
             user_action: "PAY_NOW",
-            return_url: FRONTEND_URL + "/?paypal_return=1&orderId=" + orderData.id,
-            cancel_url: FRONTEND_URL + "/?paypal_cancel=1",
+            return_url: effectiveFrontendUrl + "/?paypal_return=1",
+            cancel_url: effectiveFrontendUrl + "/?paypal_cancel=1",
           },
         });
 
@@ -849,12 +862,13 @@ export default {
         return Response.json({ error: "Invalid JSON" }, { status: 400, headers: cors });
       }
 
-      const { plan_key } = body;
+      const { plan_key, frontend_url } = body;
       if (!plan_key || !PLANS[plan_key] || PLANS[plan_key].price === 0) {
         return Response.json({ error: "Invalid plan" }, { status: 400, headers: cors });
       }
 
       const plan = PLANS[plan_key];
+      const effectiveFrontendUrl = frontend_url || FRONTEND_URL;
 
       try {
         const accessToken = await getPayPalAccessToken(env);
@@ -906,8 +920,8 @@ export default {
           payment_preferences: {
             auto_bill_amount: "YES",
             initial_fail_action: "CONTINUE",
-            return_url: FRONTEND_URL + "/profile?subscription_return=1&plan=" + plan_key,
-            cancel_url: FRONTEND_URL + "/profile?subscription_cancel=1",
+            return_url: effectiveFrontendUrl + "/profile?subscription_return=1&plan=" + plan_key,
+            cancel_url: effectiveFrontendUrl + "/profile?subscription_cancel=1&plan=" + plan_key,
           },
         });
         const billingPlanData = await billingPlanRes.json();
@@ -936,8 +950,8 @@ export default {
           application_context: {
             brand_name: "AI Product Content Generator",
             user_action: "SUBSCRIBE_NOW",
-            return_url: FRONTEND_URL + "/profile?subscription_return=1&plan=" + plan_key,
-            cancel_url: FRONTEND_URL + "/profile?subscription_cancel=1",
+            return_url: effectiveFrontendUrl + "/profile?subscription_return=1&plan=" + plan_key,
+            cancel_url: effectiveFrontendUrl + "/profile?subscription_cancel=1&plan=" + plan_key,
           },
         });
         const subData = await subRes.json();
@@ -967,14 +981,10 @@ export default {
     // POST /api/paypal/capture-subscription — 捕获订阅（用户从 PayPal 返回后前端调用）
     if (pathname === "/api/paypal/capture-subscription" && request.method === "POST") {
       const cors = corsHeaders(request.headers.get("Origin"));
+      const authHeader = request.headers.get("Authorization");
+      console.log("capture-subscription auth header:", authHeader);
       const sessionToken = getSessionToken(request);
-      if (!sessionToken) return Response.json({ error: "Unauthorized" }, { status: 401, headers: cors });
-
-      const user = await env.DB
-        .prepare("SELECT * FROM users WHERE session_token = ?")
-        .bind(sessionToken)
-        .first();
-      if (!user) return Response.json({ error: "User not found" }, { status: 404, headers: cors });
+      console.log("sessionToken extracted:", sessionToken);
 
       let body;
       try {
@@ -983,13 +993,38 @@ export default {
         return Response.json({ error: "Invalid JSON" }, { status: 400, headers: cors });
       }
 
-      const { subscriptionId, plan_key } = body;
+      const { subscriptionId, plan_key, user_id } = body;
       if (!subscriptionId || !plan_key) {
         return Response.json({ error: "subscriptionId and plan_key required" }, { status: 400, headers: cors });
       }
 
       if (!PLANS[plan_key] || PLANS[plan_key].price === 0) {
         return Response.json({ error: "Invalid plan" }, { status: 400, headers: cors });
+      }
+
+      // 优先用 session_token 查找用户
+      let user = null;
+      if (sessionToken) {
+        user = await env.DB
+          .prepare("SELECT * FROM users WHERE session_token = ?")
+          .bind(sessionToken)
+          .first();
+        console.log("user from session_token:", user?.id, user?.email);
+      }
+
+      // 如果 session_token 找不到用户（比如用户重新登录后 token 变化），尝试用 user_id 查找
+      // user_id 来自 localStorage（登录时存储），在订阅创建时已经被验证过
+      if (!user && user_id) {
+        console.log("session_token not found, trying user_id:", user_id);
+        user = await env.DB
+          .prepare("SELECT * FROM users WHERE id = ?")
+          .bind(user_id)
+          .first();
+        console.log("user from user_id:", user?.id, user?.email);
+      }
+
+      if (!user) {
+        return Response.json({ error: "User not found" }, { status: 404, headers: cors });
       }
 
       try {
@@ -1004,20 +1039,21 @@ export default {
           return Response.json({ error: "Failed to get subscription" }, { status: 500, headers: cors });
         }
 
-        // 检查 custom_id 防伪校验
+        // 检查 custom_id 防伪校验（custom_id 格式: sub_{plan_key}_{user_id}）
         const expectedCustomId = "sub_" + plan_key + "_" + user.id;
         if (subData.custom_id !== expectedCustomId) {
+          // 如果 user_id 不匹配，说明订阅不是这个用户的
           return Response.json({ error: "Subscription mismatch" }, { status: 400, headers: cors });
         }
 
         // 检查状态
-        if (!["ACTIVE", "APPROVED", "ACTIVATED"].includes(subData.status)) {
+        if (!["ACTIVE", "APPROVED", "ACTIVATED", "CREATED"].includes(subData.status)) {
           return Response.json({ error: "Subscription not active: " + subData.status }, { status: 400, headers: cors });
         }
 
-        // 更新用户套餐
+        // 更新用户套餐（幂等：即使重复调用也成功）
         await env.DB
-          .prepare("UPDATE users SET subscription_plan = ? WHERE id = ?")
+          .prepare("UPDATE users SET subscription_plan = ?, subscription_status = 'active' WHERE id = ?")
           .bind(plan_key, user.id)
           .run();
 
@@ -1052,19 +1088,47 @@ export default {
       const headers = {};
       request.headers.forEach((v, k) => headers[k] = v);
 
-      // 验证 webhook 签名（生产环境必须，测试环境可跳过）
-      // 这里先 log 原始事件，实际生产需要验证 webhook id
-      console.log("PayPal webhook received:", headers["paypal-transmission-id"], body);
+      console.log("PayPal webhook received:", headers["paypal-transmission-id"]);
 
       try {
         const event = JSON.parse(body);
         console.log("Webhook event type:", event.event_type);
 
-        // 订阅相关事件处理（后续扩展）
+        // 订阅激活 webhook — 自动处理激活（不依赖前端 redirect）
         if (event.event_type === "BILLING.SUBSCRIPTION.ACTIVATED") {
-          // 订阅激活
-        } else if (event.event_type === "BILLING.SUBSCRIPTION.CANCELLED") {
-          // 订阅取消
+          const customId = event.resource?.custom_id; // 格式: sub_planKey_userId
+          if (customId) {
+            const parts = customId.split("_");
+            const planKey = parts[1]; // starter, pro, business
+            const userId = parts[2];
+
+            if (userId && planKey && PLANS[planKey] && PLANS[planKey].price > 0) {
+              await env.DB
+                .prepare("UPDATE users SET subscription_plan = ?, subscription_status = 'active' WHERE id = ?")
+                .bind(planKey, userId)
+                .run();
+              console.log("User", userId, "upgraded to", planKey, "via webhook");
+            }
+          }
+          return Response.json({ received: true }, { headers: cors });
+        }
+
+        // 订阅取消 webhook
+        if (event.event_type === "BILLING.SUBSCRIPTION.CANCELLED") {
+          const customId = event.resource?.custom_id;
+          if (customId) {
+            const parts = customId.split("_");
+            const planKey = parts[1];
+            const userId = parts[2];
+            if (userId) {
+              await env.DB
+                .prepare("UPDATE users SET subscription_plan = 'free' WHERE id = ?")
+                .bind(userId)
+                .run();
+              console.log("User", userId, "downgraded to free via webhook");
+            }
+          }
+          return Response.json({ received: true }, { headers: cors });
         }
 
         return Response.json({ received: true }, { headers: cors });

@@ -64,18 +64,34 @@ function ProfileContent() {
   const [history, setHistory] = useState<GenerationRecord[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [historyDaysLimit, setHistoryDaysLimit] = useState<number | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<GenerationRecord | null>(null);
+  const [subscriptionMessage, setSubscriptionMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
   const searchParams = useSearchParams();
 
-  const fetchUserData = useCallback(async (token: string) => {
+  // 从 Cookie 中读取 session_token 作为 localStorage 的备份
+  const getSessionTokenFromCookie = () => {
+    if (typeof document === "undefined") return null;
+    const match = document.cookie.match(/session_token=([^;]+)/);
+    return match ? match[1] : null;
+  };
+
+  const fetchUserData = useCallback(async (token?: string) => {
     try {
-      const res = await fetch(`${WORKER_URL}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // 优先用传入的 token，其次 localStorage，最后 cookie
+      const authToken = token || localStorage.getItem("auth_token") || getSessionTokenFromCookie();
+      const headers: Record<string, string> = {};
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+      const res = await fetch(`${WORKER_URL}/auth/me`, { headers });
       const data = await res.json();
       if (data.authenticated) {
         setUser(data.user);
+        // 如果是从 cookie 获取的 token，也存到 localStorage
+        if (!token && !localStorage.getItem("auth_token") && authToken) {
+          localStorage.setItem("auth_token", authToken);
+        }
         localStorage.setItem("auth_user", JSON.stringify(data.user));
       }
     } catch (err) {
@@ -97,6 +113,9 @@ function ProfileContent() {
         }
         setHasMoreHistory(data.generations.length === 10);
         setHistoryPage(page);
+        if (data.history_days_limit) {
+          setHistoryDaysLimit(data.history_days_limit);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch history:", err);
@@ -138,6 +157,7 @@ function ProfileContent() {
     if (subscriptionCancel === "1") {
       window.history.replaceState({}, "", "/profile");
       setShowUpgradeModal(false);
+      setSubscriptionMessage({ type: 'info', text: '订阅已取消' });
       return;
     }
 
@@ -146,35 +166,50 @@ function ProfileContent() {
       setShowUpgradeModal(true);
     }
 
-    if (subscriptionReturn === "1" && planKey && subscriptionId) {
+    // PayPal may redirect with token=subscriptionId or with our custom subscription_id param
+    const effectiveSubscriptionId = subscriptionId || searchParams.get("token");
+
+    if (subscriptionReturn === "1" && planKey && effectiveSubscriptionId) {
       const token = localStorage.getItem("auth_token");
-      if (!token) {
-        alert("请重新登录后再试");
-        window.history.replaceState({}, "", "/profile");
-        return;
-      }
+      const storedUser = localStorage.getItem("auth_user");
+      const parsedUser = storedUser ? JSON.parse(storedUser) : null;
+      const userId = parsedUser?.id || null;
 
       (async () => {
         try {
+          // 尝试调用 capture-subscription（后端也支持 cookie 中的 session_token）
           const captureRes = await fetch(`${WORKER_URL}/api/paypal/capture-subscription`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
-            body: JSON.stringify({ subscriptionId, plan_key: planKey }),
+            body: JSON.stringify({ subscriptionId: effectiveSubscriptionId, plan_key: planKey, user_id: userId }),
           });
 
           const captureData = await captureRes.json();
 
           if (!captureRes.ok) {
-            alert("订阅激活失败: " + (captureData.error || "未知错误"));
+            // 如果后端也无法认证（cookie也没有），说明真的需要重新登录
+            if (captureRes.status === 401) {
+              setSubscriptionMessage({
+                type: 'info',
+                text: '订阅已成功创建！请重新登录以查看更新后的套餐。',
+              });
+              // 尝试用 cookie 刷新用户数据（webhook 可能已激活订阅）
+              fetchUserData();
+            } else {
+              setSubscriptionMessage({
+                type: 'error',
+                text: '订阅激活失败: ' + (captureData.error || "未知错误"),
+              });
+            }
             window.history.replaceState({}, "", "/profile");
             setShowUpgradeModal(false);
             return;
           }
 
-          // 更新用户信息
+          // 激活成功，更新用户信息
           const storedUser = localStorage.getItem("auth_user");
           if (storedUser) {
             const parsedUser = JSON.parse(storedUser);
@@ -189,7 +224,10 @@ function ProfileContent() {
             localStorage.setItem("auth_user", JSON.stringify(updatedUser));
           }
 
-          alert("订阅成功！您已升级到 " + planKey.toUpperCase() + " 方案");
+          setSubscriptionMessage({
+            type: 'success',
+            text: `🎉 订阅成功！您已升级到 ${planKey.toUpperCase()} 方案`,
+          });
           window.history.replaceState({}, "", "/profile");
           setShowUpgradeModal(false);
 
@@ -197,7 +235,11 @@ function ProfileContent() {
           if (token) fetchUserData(token);
 
         } catch (err) {
-          alert("订阅激活失败: " + (err instanceof Error ? err.message : "未知错误"));
+          // 网络错误或其他问题，提示用户刷新页面
+          setSubscriptionMessage({
+            type: 'info',
+            text: '订阅已成功创建（请刷新页面查看更新）',
+          });
           window.history.replaceState({}, "", "/profile");
           setShowUpgradeModal(false);
         }
@@ -272,6 +314,7 @@ function ProfileContent() {
     setAuthenticated(false);
     setUser(null);
     setHistory([]);
+    setHistoryDaysLimit(null);
   };
 
   const loadMoreHistory = () => {
@@ -366,6 +409,24 @@ function ProfileContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      {/* 订阅消息横幅 */}
+      {subscriptionMessage && (
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-lg text-white max-w-md w-full mx-4 transition-all ${
+          subscriptionMessage.type === 'success' ? 'bg-green-600' :
+          subscriptionMessage.type === 'error' ? 'bg-red-600' : 'bg-blue-600'
+        }`}>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">{subscriptionMessage.text}</p>
+            <button
+              onClick={() => setSubscriptionMessage(null)}
+              className="ml-3 text-white/80 hover:text-white text-lg leading-none"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 升级弹窗 */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -628,7 +689,12 @@ function ProfileContent() {
 
         {/* 使用记录 */}
         <div className="bg-white rounded-2xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">使用记录</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-slate-800">使用记录</h3>
+            {historyDaysLimit && (
+              <span className="text-xs text-slate-500">显示最近 {historyDaysLimit} 天内的记录</span>
+            )}
+          </div>
 
           {history.length === 0 ? (
             <div className="text-center py-8 text-slate-400">
