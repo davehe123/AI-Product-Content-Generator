@@ -9,10 +9,10 @@ const PLANS = {
 };
 
 const PACKAGES = {
-  "体验包": { credits: 10, price: 1 },
-  "小包": { credits: 60, price: 5 },
-  "中包": { credits: 200, price: 15 },
-  "大包": { credits: 600, price: 39 },
+  "Starter Pack": { credits: 10, price: 1 },
+  "Small Pack": { credits: 60, price: 5 },
+  "Medium Pack": { credits: 200, price: 15 },
+  "Large Pack": { credits: 600, price: 39 },
 };
 
 // ========== PayPal 配置 ==========
@@ -142,42 +142,42 @@ async function getUserUsage(db, userId, tier) {
 // 模板配置
 const CATEGORIES = {
   electronics: {
-    name: "数码电子",
+    name: "Electronics",
     nameEn: "Electronics",
     guidance: "Include key specs, compatibility info, warranty mentions. Focus on technical benefits users care about (speed, battery life, connectivity). Address common concerns like 'is it compatible with...' in bullets."
   },
   clothing: {
-    name: "服装配饰",
+    name: "Clothing & Accessories",
     nameEn: "Clothing & Apparel",
     guidance: "Emphasize material quality, fit guidance, sizing tips. Use sensory language (soft, breathable, lightweight). Include styling suggestions and occasions."
   },
   home: {
-    name: "家居厨房",
+    name: "Home & Kitchen",
     nameEn: "Home & Kitchen",
     guidance: "Highlight durability, ease of use, space-saving benefits. Mention quality of materials (stainless steel, BPA-free, etc.). Include use cases and room compatibility."
   },
   beauty: {
-    name: "美妆护肤",
+    name: "Beauty",
     nameEn: "Beauty & Personal Care",
     guidance: "Focus on ingredients, skin type compatibility, expected results. Use before/after language. Address safety concerns (dermatologist tested, hypoallergenic, etc.)."
   },
   sports: {
-    name: "运动户外",
+    name: "Sports & Outdoors",
     nameEn: "Sports & Outdoors",
     guidance: "Emphasize performance benefits, durability in outdoor conditions, versatility. Include skill level recommendations and use scenario specifics."
   },
   baby: {
-    name: "母婴玩具",
+    name: "Baby & Toys",
     nameEn: "Baby & Toys",
     guidance: "Safety is paramount - highlight certifications, age appropriateness, non-toxic materials. Focus on developmental benefits, durability, easy cleaning."
   },
   food: {
-    name: "食品饮料",
+    name: "Food & Beverages",
     nameEn: "Food & Beverages",
     guidance: "Emphasize taste, ingredients, health benefits, dietary compatibility (organic, gluten-free, etc.). Include serving suggestions and storage tips."
   },
   other: {
-    name: "其他",
+    name: "Other",
     nameEn: "General",
     guidance: "Focus on core benefits and value proposition. Adapt language to the specific product category."
   }
@@ -189,15 +189,15 @@ const STYLES = {
     guidance: "Classic Amazon listing style. Professional, informative, focus on key features and benefits."
   },
   high_conversion: {
-    name: "高转化率",
+    name: "High Conversion",
     guidance: "Urgency and FOMO-driven. Use power words, create sense of exclusivity, emphasize limited availability or popular demand. Stronger CTAs."
   },
   premium: {
-    name: "轻奢高端",
+    name: "Premium Luxury",
     guidance: "Sophisticated, aspirational language. Emphasize exclusivity, quality craftsmanship, premium materials. Higher-end vocabulary and tone."
   },
   social: {
-    name: "社交媒体友好",
+    name: "Social Media Friendly",
     guidance: "Short, punchy sentences. Hashtag-friendly phrases. Shareable, viral-worthy copy. Instagram/TikTok style energy."
   }
 };

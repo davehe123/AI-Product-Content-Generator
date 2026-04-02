@@ -70,7 +70,7 @@ function ProfileContent() {
   const [subscriptionMessage, setSubscriptionMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
   const searchParams = useSearchParams();
 
-  // 从 Cookie 中读取 session_token 作为 localStorage 的备份
+  // 从 Cookie 中读取 session_token as localStorage 的备份
   const getSessionTokenFromCookie = () => {
     if (typeof document === "undefined") return null;
     const match = document.cookie.match(/session_token=([^;]+)/);
@@ -79,7 +79,7 @@ function ProfileContent() {
 
   const fetchUserData = useCallback(async (token?: string) => {
     try {
-      // 优先用传入的 token，其次 localStorage，最后 cookie
+      // Prioritize passed token，Second localStorage，Last cookie
       const authToken = token || localStorage.getItem("auth_token") || getSessionTokenFromCookie();
       const headers: Record<string, string> = {};
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
@@ -88,7 +88,7 @@ function ProfileContent() {
       const data = await res.json();
       if (data.authenticated) {
         setUser(data.user);
-        // 如果是从 cookie 获取的 token，也存到 localStorage
+        // 如果是从 cookie obtained token，also save to localStorage
         if (!token && !localStorage.getItem("auth_token") && authToken) {
           localStorage.setItem("auth_token", authToken);
         }
@@ -146,7 +146,7 @@ function ProfileContent() {
     initAuth();
   }, [fetchUserData, fetchHistory]);
 
-  // 处理 PayPal 订阅返回 + upgrade 触发
+  // 处理 PayPal Subscription Return + upgrade trigger
   useEffect(() => {
     const subscriptionReturn = searchParams.get("subscription_return");
     const subscriptionCancel = searchParams.get("subscription_cancel");
@@ -157,7 +157,7 @@ function ProfileContent() {
     if (subscriptionCancel === "1") {
       window.history.replaceState({}, "", "/profile");
       setShowUpgradeModal(false);
-      setSubscriptionMessage({ type: 'info', text: '订阅已取消' });
+      setSubscriptionMessage({ type: 'info', text: 'Subscription Cancelled' });
       return;
     }
 
@@ -177,7 +177,7 @@ function ProfileContent() {
 
       (async () => {
         try {
-          // 尝试调用 capture-subscription（后端也支持 cookie 中的 session_token）
+          // Trying to call capture-subscription（Backend also supports cookie in session_token）
           const captureRes = await fetch(`${WORKER_URL}/api/paypal/capture-subscription`, {
             method: "POST",
             headers: {
@@ -190,18 +190,18 @@ function ProfileContent() {
           const captureData = await captureRes.json();
 
           if (!captureRes.ok) {
-            // 如果后端也无法认证（cookie也没有），说明真的需要重新登录
+            // 如果后端也无法认证（cookiealso not），means user really needs to re-login
             if (captureRes.status === 401) {
               setSubscriptionMessage({
                 type: 'info',
-                text: '订阅已成功创建！请重新登录以查看更新后的套餐。',
+                text: 'Subscription created successfully！请重新登录以View更新后的套餐。',
               });
-              // 尝试用 cookie 刷新用户数据（webhook 可能已激活订阅）
+              // 尝试用 cookie Refreshing user data（webhook Subscription may already be activated）
               fetchUserData();
             } else {
               setSubscriptionMessage({
                 type: 'error',
-                text: '订阅激活失败: ' + (captureData.error || "未知错误"),
+                text: 'Subscription Activation Failed: ' + (captureData.error || "未知错误"),
               });
             }
             window.history.replaceState({}, "", "/profile");
@@ -209,7 +209,7 @@ function ProfileContent() {
             return;
           }
 
-          // 激活成功，更新用户信息
+          // 激活成功，Updating user info
           const storedUser = localStorage.getItem("auth_user");
           if (storedUser) {
             const parsedUser = JSON.parse(storedUser);
@@ -226,19 +226,19 @@ function ProfileContent() {
 
           setSubscriptionMessage({
             type: 'success',
-            text: `🎉 订阅成功！您已升级到 ${planKey.toUpperCase()} 方案`,
+            text: `🎉 订阅成功！您已Upgrade to ${planKey.toUpperCase()} 方案`,
           });
           window.history.replaceState({}, "", "/profile");
           setShowUpgradeModal(false);
 
-          // 刷新用户数据
+          // Refreshing user data
           if (token) fetchUserData(token);
 
         } catch (err) {
-          // 网络错误或其他问题，提示用户刷新页面
+          // 网络错误或其他问题，Prompt user to refresh page
           setSubscriptionMessage({
             type: 'info',
-            text: '订阅已成功创建（请刷新页面查看更新）',
+            text: 'Subscription created successfully（请Refresh页面View更新）',
           });
           window.history.replaceState({}, "", "/profile");
           setShowUpgradeModal(false);
@@ -264,16 +264,16 @@ function ProfileContent() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert("订阅创建失败: " + (data.error || "未知错误"));
+        alert("Subscription creation failed: " + (data.error || "Unknown error"));
         return;
       }
 
-      // 跳转到 PayPal 订阅授权页面
+      // 跳转到 PayPal Subscription Authorization Page
       // eslint-disable-next-line react-hooks/immutability
       window.location.href = data.approvalUrl;
 
     } catch (err) {
-      alert("订阅创建失败: " + (err instanceof Error ? err.message : "未知错误"));
+      alert("Subscription creation failed: " + (err instanceof Error ? err.message : "Unknown error"));
     }
   };
 
@@ -388,8 +388,8 @@ function ProfileContent() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
         <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full mx-4 text-center">
           <div className="text-5xl mb-4">👤</div>
-          <h1 className="text-2xl font-bold text-slate-800 mb-2">个人中心</h1>
-          <p className="text-slate-600 mb-6">登录后查看您的账户信息和使用记录</p>
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">My Account</h1>
+          <p className="text-slate-600 mb-6">Login to view your account info and usage</p>
           <button
             onClick={handleLogin}
             className="flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition mx-auto"
@@ -409,7 +409,7 @@ function ProfileContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* 订阅消息横幅 */}
+      {/* Subscription Banner */}
       {subscriptionMessage && (
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-lg text-white max-w-md w-full mx-4 transition-all ${
           subscriptionMessage.type === 'success' ? 'bg-green-600' :
@@ -427,54 +427,54 @@ function ProfileContent() {
         </div>
       )}
 
-      {/* 升级弹窗 */}
+      {/* Upgrade */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="text-center mb-6">
               <div className="text-5xl mb-4">⚡</div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">选择适合您的套餐</h2>
-              <p className="text-slate-600">解锁更多积分和高级功能</p>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Choose a plan that suits you</h2>
+              <p className="text-slate-600">Unlock more credits and advanced features</p>
             </div>
 
-            {/* 套餐对比表 */}
+            {/* Plan Comparison */}
             <div className="grid md:grid-cols-2 gap-4 mb-6">
               {[
                 {
                   name: "Free",
                   price: "$0",
-                  period: "永久免费",
+                  period: "Free Forever",
                   credits: "3",
-                  features: ["3 次免费生成", "基础模板", "英文支持", "社区支持"],
+                  features: ["3 free generations", "Basic Templates", "English Support", "Community Support"],
                   highlight: false,
-                  cta: "当前方案",
+                  cta: "Current Plan",
                 },
                 {
                   name: "Starter",
                   price: "$5",
-                  period: "/月",
+                  period: "//mo",
                   credits: "60",
-                  features: ["60 积分/月", "所有基础模板", "中英双语", "Email 支持", "最近 7 天历史"],
+                  features: ["60 Credits/mo", "All Basic Templates", "Bilingual Support", "Email Support", "7 days of history"],
                   highlight: false,
-                  cta: "选择 Starter",
+                  cta: "Select Starter",
                 },
                 {
                   name: "Pro",
                   price: "$15",
-                  period: "/月",
+                  period: "//mo",
                   credits: "200",
-                  features: ["200 积分/月", "高级模板", "多语言支持（中/英/日/韩）", "优先 Email 支持", "30 天历史记录", "PDF 导出"],
+                  features: ["200 Credits/mo", "Advanced Templates", "Multi-language (CN/EN/JP/KR)", "Priority Email Support", "30 days of history", "PDF Export"],
                   highlight: true,
-                  cta: "最受欢迎",
+                  cta: "Most Popular",
                 },
                 {
                   name: "Business",
                   price: "$39",
-                  period: "/月",
+                  period: "//mo",
                   credits: "600",
-                  features: ["600 积分/月", "企业定制模板", "全语言支持", "7×24 优先支持", "90 天历史记录", "PDF/CSV 导出", "API 访问"],
+                  features: ["600 Credits/mo", "Enterprise Templates", "Full Language Support", "7×24 Priority Support", "90 days of history", "PDF/CSV Export", "API Access"],
                   highlight: false,
-                  cta: "选择 Business",
+                  cta: "Select Business",
                 },
               ].map((plan) => (
                 <div
@@ -487,7 +487,7 @@ function ProfileContent() {
                 >
                   {plan.highlight && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-xs font-medium px-3 py-1 rounded-full">
-                      推荐
+                      Recommended
                     </div>
                   )}
                   <div className="text-center mb-4">
@@ -503,7 +503,7 @@ function ProfileContent() {
                   <div className="text-center mb-4">
                     <div className="inline-flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1">
                       <span className="text-lg">💰</span>
-                      <span className="font-semibold text-slate-700">{plan.credits} 积分/月</span>
+                      <span className="font-semibold text-slate-700">{plan.credits} Credits/mo</span>
                     </div>
                   </div>
 
@@ -542,7 +542,7 @@ function ProfileContent() {
                 onClick={() => setShowUpgradeModal(false)}
                 className="text-slate-500 hover:text-slate-700 text-sm py-2"
               >
-                关闭
+                Close
               </button>
             </div>
           </div>
@@ -553,18 +553,18 @@ function ProfileContent() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">个人中心</h1>
-            <p className="text-slate-600 mt-1">管理您的账户和积分</p>
+            <h1 className="text-3xl font-bold text-slate-900">My Account</h1>
+            <p className="text-slate-600 mt-1">Manage your account and credits</p>
           </div>
           <button
             onClick={() => window.location.href = "/"}
             className="text-sm bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 px-4 py-2 rounded-lg transition"
           >
-            ← 返回首页
+            ← Back to Home
           </button>
         </div>
 
-        {/* 用户信息卡片 */}
+        {/* User Info Card */}
         <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
           <div className="flex items-center gap-4">
             {user.picture ? (
@@ -586,7 +586,7 @@ function ProfileContent() {
                     ? "bg-green-100 text-green-700"
                     : "bg-slate-100 text-slate-600"
                 }`}>
-                  {user.subscription_status === "active" ? "✅ 活跃" : "⚠️ 未激活"}
+                  {user.subscription_status === "active" ? "✅ Active" : "⚠️ Inactive"}
                 </span>
               </div>
             </div>
@@ -594,19 +594,19 @@ function ProfileContent() {
               onClick={handleLogout}
               className="text-sm bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-lg transition"
             >
-              退出登录
+              Logout
             </button>
           </div>
         </div>
 
-        {/* 积分信息 */}
+        {/* Credits Info */}
         <div className="grid md:grid-cols-3 gap-4 mb-6">
-          {/* 总积分 */}
+          {/* Total Credits */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-xl">💰</div>
               <div>
-                <p className="text-sm text-slate-500">总剩余积分</p>
+                <p className="text-sm text-slate-500">Total Remaining</p>
                 <p className="text-2xl font-bold text-blue-600">{user.credits_remaining}</p>
               </div>
             </div>
@@ -616,70 +616,70 @@ function ProfileContent() {
                 style={{ width: `${creditPercent()}%` }}
               />
             </div>
-            <p className="text-xs text-slate-400 mt-2">使用率 {creditPercent()}%</p>
+            <p className="text-xs text-slate-400 mt-2">Usage Rate {creditPercent()}%</p>
           </div>
 
-          {/* 月度积分 */}
+          {/* Monthly Credits */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center text-xl">📅</div>
               <div>
-                <p className="text-sm text-slate-500">本月额度</p>
+                <p className="text-sm text-slate-500">Monthly Allowance</p>
                 <p className="text-2xl font-bold text-purple-600">{user.monthly_remaining}</p>
               </div>
             </div>
             <p className="text-sm text-slate-500">
-              已用 <span className="font-medium text-slate-700">{user.monthly_used}</span> /{" "}
+              Used <span className="font-medium text-slate-700">{user.monthly_used}</span> /{" "}
               <span className="font-medium text-slate-700">{user.monthly_credits}</span>
             </p>
-            <p className="text-xs text-slate-400 mt-1">每月重置</p>
+            <p className="text-xs text-slate-400 mt-1">Resets Monthly</p>
           </div>
 
-          {/* 积分包 */}
+          {/* Credits */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-xl">📦</div>
               <div>
-                <p className="text-sm text-slate-500">积分包剩余</p>
+                <p className="text-sm text-slate-500">Package Remaining</p>
                 <p className="text-2xl font-bold text-green-600">{user.package_remaining}</p>
               </div>
             </div>
-            <p className="text-sm text-slate-500">购买积分包获取更多额度</p>
+            <p className="text-sm text-slate-500">Buy credits to get more allowance</p>
             <button
               onClick={() => window.location.href = "/?upgrade=true"}
               className="text-xs text-green-600 hover:text-green-700 font-medium mt-1"
             >
-              购买积分 →
+              Buy Credits →
             </button>
           </div>
         </div>
 
-        {/* 套餐信息 */}
+        {/* Plan Info */}
         <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-800">套餐信息</h3>
+            <h3 className="text-lg font-semibold text-slate-800">Plan Info</h3>
             <button
               onClick={() => setShowUpgradeModal(true)}
               className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
             >
-              升级套餐
+              Upgrade Plan
             </button>
           </div>
           <div className="grid md:grid-cols-4 gap-4">
             <div className="bg-slate-50 rounded-lg p-4">
-              <p className="text-sm text-slate-500 mb-1">当前套餐</p>
+              <p className="text-sm text-slate-500 mb-1">Current Plan</p>
               <p className="font-bold text-slate-800">{PLAN_NAMES[user.subscription_plan] || "Free"}</p>
             </div>
             <div className="bg-slate-50 rounded-lg p-4">
-              <p className="text-sm text-slate-500 mb-1">套餐状态</p>
-              <p className="font-bold text-slate-800">{user.subscription_status === "active" ? "活跃" : "未激活"}</p>
+              <p className="text-sm text-slate-500 mb-1">Plan Status</p>
+              <p className="font-bold text-slate-800">{user.subscription_status === "active" ? "Active" : "Inactive"}</p>
             </div>
             <div className="bg-slate-50 rounded-lg p-4">
-              <p className="text-sm text-slate-500 mb-1">月度额度</p>
-              <p className="font-bold text-slate-800">{user.monthly_credits} 次</p>
+              <p className="text-sm text-slate-500 mb-1">Monthly Allowance</p>
+              <p className="font-bold text-slate-800">{user.monthly_credits} times</p>
             </div>
             <div className="bg-slate-50 rounded-lg p-4">
-              <p className="text-sm text-slate-500 mb-1">注册时间</p>
+              <p className="text-sm text-slate-500 mb-1">Registered</p>
               <p className="font-bold text-slate-800 text-sm">
                 {user.created_at ? formatDate(user.created_at).split(" ")[0] : "-"}
               </p>
@@ -687,24 +687,24 @@ function ProfileContent() {
           </div>
         </div>
 
-        {/* 使用记录 */}
+        {/* Usage History */}
         <div className="bg-white rounded-2xl shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-800">使用记录</h3>
+            <h3 className="text-lg font-semibold text-slate-800">Usage History</h3>
             {historyDaysLimit && (
-              <span className="text-xs text-slate-500">显示最近 {historyDaysLimit} 天内的记录</span>
+              <span className="text-xs text-slate-500">Showing records from the last {historyDaysLimit} days</span>
             )}
           </div>
 
           {history.length === 0 ? (
             <div className="text-center py-8 text-slate-400">
               <div className="text-4xl mb-2">📭</div>
-              <p>暂无使用记录</p>
+              <p>No usage records yet</p>
               <button
                 onClick={() => window.location.href = "/"}
                 className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium"
               >
-                去生成内容 →
+                Go Generate Content →
               </button>
             </div>
           ) : (
@@ -724,9 +724,9 @@ function ProfileContent() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                        -{record.credits_used} 积分
+                        -{record.credits_used} Credits
                       </span>
-                      <span className="text-blue-500">查看 →</span>
+                      <span className="text-blue-500">View →</span>
                     </div>
                   </div>
                 ))}
@@ -738,7 +738,7 @@ function ProfileContent() {
                     onClick={loadMoreHistory}
                     className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-2 rounded-lg transition"
                   >
-                    加载更多
+                    Load More
                   </button>
                 </div>
               )}
@@ -746,12 +746,12 @@ function ProfileContent() {
           )}
         </div>
 
-        {/* 记录详情弹窗 */}
+        {/* Record Details */}
         {selectedRecord && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSelectedRecord(null)}>
             <div className="bg-white rounded-2xl p-6 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-slate-800">生成详情</h3>
+                <h3 className="text-lg font-semibold text-slate-800">Generation Details</h3>
                 <div className="flex items-center gap-2">
                   {selectedRecord.generated_title && (
                     <>
@@ -790,35 +790,35 @@ function ProfileContent() {
               </div>
 
               <div className="space-y-4">
-                {/* 输入信息 */}
+                {/* Input Info */}
                 <div className="bg-slate-50 rounded-lg p-4">
-                  <h4 className="text-sm font-medium text-slate-500 mb-2">📝 输入信息</h4>
+                  <h4 className="text-sm font-medium text-slate-500 mb-2">📝 Input Info</h4>
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <p><span className="text-slate-500">产品：</span>{selectedRecord.product_name}</p>
-                    {selectedRecord.brand_name && <p><span className="text-slate-500">品牌：</span>{selectedRecord.brand_name}</p>}
-                    {selectedRecord.features && <p className="col-span-2"><span className="text-slate-500">特性：</span>{selectedRecord.features}</p>}
-                    {selectedRecord.audience && <p><span className="text-slate-500">受众：</span>{selectedRecord.audience}</p>}
-                    {selectedRecord.tone && <p><span className="text-slate-500">语气：</span>{selectedRecord.tone}</p>}
-                    {selectedRecord.platform && <p><span className="text-slate-500">平台：</span>{selectedRecord.platform}</p>}
-                    {selectedRecord.category && <p><span className="text-slate-500">分类：</span>{selectedRecord.category}</p>}
-                    {selectedRecord.style && <p><span className="text-slate-500">风格：</span>{selectedRecord.style}</p>}
+                    <p><span className="text-slate-500">Product：</span>{selectedRecord.product_name}</p>
+                    {selectedRecord.brand_name && <p><span className="text-slate-500">Brand：</span>{selectedRecord.brand_name}</p>}
+                    {selectedRecord.features && <p className="col-span-2"><span className="text-slate-500">Features：</span>{selectedRecord.features}</p>}
+                    {selectedRecord.audience && <p><span className="text-slate-500">Audience：</span>{selectedRecord.audience}</p>}
+                    {selectedRecord.tone && <p><span className="text-slate-500">Tone：</span>{selectedRecord.tone}</p>}
+                    {selectedRecord.platform && <p><span className="text-slate-500">Platform：</span>{selectedRecord.platform}</p>}
+                    {selectedRecord.category && <p><span className="text-slate-500">Category：</span>{selectedRecord.category}</p>}
+                    {selectedRecord.style && <p><span className="text-slate-500">Style：</span>{selectedRecord.style}</p>}
                   </div>
                 </div>
 
-                {/* 生成的标题 */}
+                {/* Generated Title */}
                 {selectedRecord.generated_title && (
                   <div>
-                    <h4 className="text-sm font-medium text-slate-500 mb-2">✨ 标题</h4>
+                    <h4 className="text-sm font-medium text-slate-500 mb-2">✨ Title</h4>
                     <div className="p-3 bg-blue-50 rounded-lg text-sm text-slate-800">
                       {selectedRecord.generated_title}
                     </div>
                   </div>
                 )}
 
-                {/* 生成的要点 */}
+                {/* Generated Bullets */}
                 {selectedRecord.generated_bullets && (
                   <div>
-                    <h4 className="text-sm font-medium text-slate-500 mb-2">📋 要点</h4>
+                    <h4 className="text-sm font-medium text-slate-500 mb-2">📋 Bullets</h4>
                     <div className="p-3 bg-blue-50 rounded-lg space-y-2">
                       {(() => {
                         try {
@@ -837,10 +837,10 @@ function ProfileContent() {
                   </div>
                 )}
 
-                {/* 生成的描述 */}
+                {/* Generated Description */}
                 {selectedRecord.generated_description && (
                   <div>
-                    <h4 className="text-sm font-medium text-slate-500 mb-2">📄 描述</h4>
+                    <h4 className="text-sm font-medium text-slate-500 mb-2">📄 Description</h4>
                     <div className="p-3 bg-blue-50 rounded-lg text-sm text-slate-800 whitespace-pre-line">
                       {selectedRecord.generated_description}
                     </div>
@@ -849,7 +849,7 @@ function ProfileContent() {
               </div>
 
               <div className="mt-4 pt-4 border-t border-slate-200 text-center text-xs text-slate-400">
-                生成时间：{formatDate(selectedRecord.created_at)} · 消耗 {selectedRecord.credits_used} 积分
+                Generated at{formatDate(selectedRecord.created_at)} · Used {selectedRecord.credits_used} Credits
               </div>
             </div>
           </div>
@@ -857,7 +857,7 @@ function ProfileContent() {
 
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-slate-500">
-          <p>AI Product Content Generator · 个人中心</p>
+          <p>AI Product Content Generator · My Account</p>
         </div>
       </div>
     </div>

@@ -13,10 +13,10 @@ const PLAN_NAMES: Record<string, string> = {
 };
 
 const PACKAGES = [
-  { key: "体验包", credits: 10, price: 1 },
-  { key: "小包", credits: 60, price: 5 },
-  { key: "中包", credits: 200, price: 15 },
-  { key: "大包", credits: 600, price: 39 },
+  { key: "Starter Pack", credits: 10, price: 1 },
+  { key: "Small Pack", credits: 60, price: 5 },
+  { key: "Medium Pack", credits: 200, price: 15 },
+  { key: "Large Pack", credits: 600, price: 39 },
 ];
 
 interface User {
@@ -44,7 +44,7 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// 从 Cookie 中读取 session_token 作为 localStorage 的备份
+// 从 Cookie 中读取 session_token as localStorage 的备份
 function getSessionTokenFromCookie(): string | null {
   if (typeof document === "undefined") return null;
   const match = document.cookie.match(/session_token=([^;]+)/);
@@ -73,21 +73,21 @@ export default function Home() {
 
   // 模板配置
   const categories = [
-    { id: "electronics", name: "📱 数码电子", nameEn: "Electronics" },
-    { id: "clothing", name: "👕 服装配饰", nameEn: "Clothing" },
-    { id: "home", name: "🏠 家居厨房", nameEn: "Home & Kitchen" },
-    { id: "beauty", name: "💄 美妆护肤", nameEn: "Beauty" },
-    { id: "sports", name: "⚽ 运动户外", nameEn: "Sports" },
-    { id: "baby", name: "👶 母婴玩具", nameEn: "Baby & Toys" },
-    { id: "food", name: "🍎 食品饮料", nameEn: "Food" },
-    { id: "other", name: "📦 其他", nameEn: "Other" },
+    { id: "electronics", name: "📱 Electronics", nameEn: "Electronics" },
+    { id: "clothing", name: "👕 Clothing & Accessories", nameEn: "Clothing" },
+    { id: "home", name: "🏠 Home & Kitchen", nameEn: "Home & Kitchen" },
+    { id: "beauty", name: "💄 Beauty", nameEn: "Beauty" },
+    { id: "sports", name: "⚽ Sports & Outdoors", nameEn: "Sports" },
+    { id: "baby", name: "👶 Baby & Toys", nameEn: "Baby & Toys" },
+    { id: "food", name: "🍎 Food & Beverages", nameEn: "Food" },
+    { id: "other", name: "📦 Other", nameEn: "Other" },
   ];
 
   const styles = [
-    { id: "standard", name: "📋 标准 Amazon", desc: "经典亚马逊风格" },
-    { id: "high_conversion", name: "🚀 高转化率", desc: "紧迫感/FOMO驱动" },
-    { id: "premium", name: "✨ 轻奢高端", desc: "高端大气上档次" },
-    { id: "social", name: "📱 社交媒体", desc: "短平快易传播" },
+    { id: "standard", name: "📋 Standard Amazon", desc: "Classic Amazon Style" },
+    { id: "high_conversion", name: "🚀 High Conversion", desc: "FOMO-driven" },
+    { id: "premium", name: "✨ Premium Luxury", desc: "Premium & Elegant" },
+    { id: "social", name: "📱 Social Media", desc: "Fast & Viral" },
   ];
 
   const [loading, setLoading] = useState(false);
@@ -118,7 +118,7 @@ export default function Home() {
           const data = JSON.parse(jsonStr);
           localStorage.setItem("auth_token", data.token);
 
-          // 用 token 获取完整的用户信息（含积分）
+          // 用 token 获取完整的用户信息（含Credits）
           const meRes = await fetch(`${WORKER_URL}/auth/me`, {
             headers: { Authorization: `Bearer ${data.token}` },
           });
@@ -136,7 +136,7 @@ export default function Home() {
         }
         window.history.replaceState({}, "", "/");
         setCheckingAuth(false);
-        // 登录成功，关闭 popup 并通知主窗口刷新
+        // Login success，Close popup 并通知主窗口Refresh
         if (window.opener && !window.opener.closed) {
           window.opener.location.reload();
         }
@@ -145,7 +145,7 @@ export default function Home() {
       return;
     }
 
-    // 正常恢复登录状态
+    // Resuming login state
     const storedUser = localStorage.getItem("auth_user");
     const token = localStorage.getItem("auth_token");
     
@@ -159,7 +159,7 @@ export default function Home() {
       }
     }
     
-    // 只有在非 auth_callback 的情况下才显示 error
+    // 只有在非 auth_callback 的情况下才Show error
     if (oauthError) {
       const detail = new URLSearchParams(window.location.search).get("detail") || "";
       setError("Google login failed: " + oauthError + (detail ? " | " + detail : ""));
@@ -256,7 +256,7 @@ export default function Home() {
           throw new Error("Please login again");
         }
         if (response.status === 402 || data.error === "no_credits") {
-          setUpgradeMessage(data.message || "您的积分已用完");
+          setUpgradeMessage(data.message || "Out of Credits");
           setShowUpgradeModal(true);
           return;
         }
@@ -267,7 +267,7 @@ export default function Home() {
 
       setResult(data.data);
       
-      // 更新本地积分显示
+      // 更新本地CreditsShow
       if (user && data.credits_remaining !== undefined) {
         setUser({ ...user, credits_remaining: data.credits_remaining });
       }
@@ -303,7 +303,7 @@ export default function Home() {
     setBuySuccess(false);
 
     try {
-      // 1. 创建 PayPal 订单
+      // 1. Create PayPal 订单
       const createRes = await fetch(`${WORKER_URL}/api/paypal/create-order`, {
         method: "POST",
         headers: {
@@ -345,19 +345,19 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert("订阅创建失败: " + (data.error || "未知错误"));
+        alert("Subscription creation failed: " + (data.error || "Unknown error"));
         return;
       }
 
-      // 跳转到 PayPal 订阅授权页面
+      // 跳转到 PayPal Subscription Authorization Page
       window.location.href = data.approvalUrl;
 
     } catch (err) {
-      alert("订阅创建失败: " + (err instanceof Error ? err.message : "未知错误"));
+      alert("Subscription creation failed: " + (err instanceof Error ? err.message : "Unknown error"));
     }
   };
 
-  // 处理 PayPal 返回
+  // 处理 PayPal Back
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paypalReturn = params.get("paypal_return");
@@ -407,13 +407,13 @@ export default function Home() {
 
           setBuySuccess(true);
 
-          // 从服务器重新获取用户数据确保积分刷新
+          // 从服务器重新获取用户数据确保CreditsRefresh
           await checkAuth();
 
           // 清理 URL 参数
           window.history.replaceState({}, "", "/");
 
-          // 3秒后关闭弹窗
+          // 3Closing in | seconds
           setTimeout(() => {
             setShowBuyModal(false);
             setBuySuccess(false);
@@ -430,10 +430,10 @@ export default function Home() {
       return;
     }
 
-    // 处理订阅返回 - PayPal may redirect with token=subscriptionId or our custom subscription_id param
+    // Processing subscription return - PayPal may redirect with token=subscriptionId or our custom subscription_id param
     const effectiveSubscriptionId = subscriptionId || params.get("token");
 
-    // 处理订阅返回
+    // Processing subscription return
     if (subscriptionReturn === "1" && planKey && effectiveSubscriptionId) {
       (async () => {
         try {
@@ -449,21 +449,21 @@ export default function Home() {
           const captureData = await captureRes.json();
 
           if (!captureRes.ok) {
-            alert("订阅激活失败: " + (captureData.error || "未知错误"));
+            alert("Subscription activation failed: " + (captureData.error || "Unknown error"));
             window.history.replaceState({}, "", "/");
             setShowUpgradeModal(false);
             return;
           }
 
-          // 从服务器重新获取用户数据确保积分刷新
+          // 从服务器重新获取用户数据确保CreditsRefresh
           await checkAuth();
 
-          alert("订阅成功！您已升级到 " + planKey.toUpperCase() + " 方案");
+          alert("Success! You've upgraded to " + planKey.toUpperCase());
           window.history.replaceState({}, "", "/");
           setShowUpgradeModal(false);
 
         } catch (err) {
-          alert("订阅激活失败: " + (err instanceof Error ? err.message : "未知错误"));
+          alert("Subscription activation failed: " + (err instanceof Error ? err.message : "Unknown error"));
           window.history.replaceState({}, "", "/");
           setShowUpgradeModal(false);
         }
@@ -495,54 +495,54 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* 升级弹窗 */}
+      {/* Upgrade */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-2xl w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="text-center mb-6">
               <div className="text-5xl mb-4">⚡</div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">积分已用完</h2>
-              <p className="text-slate-600">{upgradeMessage || "选择适合您的套餐继续使用"}</p>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Out of Credits</h2>
+              <p className="text-slate-600">{upgradeMessage || "Select a plan that suits you to continue"}</p>
             </div>
 
-            {/* 套餐对比表 */}
+            {/* Plan Comparison */}
             <div className="grid md:grid-cols-2 gap-4 mb-6">
               {[
                 {
                   name: "Free",
                   price: "$0",
-                  period: "永久免费",
+                  period: "Free Forever",
                   credits: "3",
-                  features: ["3 次免费生成", "基础模板", "英文支持", "社区支持"],
+                  features: ["3 free generations", "Basic Templates", "English Support", "Community Support"],
                   highlight: false,
-                  cta: "当前方案",
+                  cta: "Current Plan",
                 },
                 {
                   name: "Starter",
                   price: "$5",
-                  period: "/月",
+                  period: "//mo",
                   credits: "60",
-                  features: ["60 积分/月", "所有基础模板", "中英双语", "Email 支持", "最近 7 天历史"],
+                  features: ["60 Credits/mo", "All Basic Templates", "Bilingual Support", "Email Support", "7 days of history"],
                   highlight: false,
-                  cta: "选择 Starter",
+                  cta: "Select Starter",
                 },
                 {
                   name: "Pro",
                   price: "$15",
-                  period: "/月",
+                  period: "//mo",
                   credits: "200",
-                  features: ["200 积分/月", "高级模板", "多语言支持（中/英/日/韩）", "优先 Email 支持", "30 天历史记录", "PDF 导出"],
+                  features: ["200 Credits/mo", "Advanced Templates", "Multi-language (CN/EN/JP/KR)", "Priority Email Support", "30 days of history", "PDF Export"],
                   highlight: true,
-                  cta: "升级到 Pro",
+                  cta: "Upgrade to Pro",
                 },
                 {
                   name: "Business",
                   price: "$39",
-                  period: "/月",
+                  period: "//mo",
                   credits: "600",
-                  features: ["600 积分/月", "企业定制模板", "全语言支持", "7×24 优先支持", "90 天历史记录", "PDF/CSV 导出", "API 访问"],
+                  features: ["600 Credits/mo", "Enterprise Templates", "Full Language Support", "7×24 PrioritySupport", "90 days of history", "PDF/CSV Export", "API Access"],
                   highlight: false,
-                  cta: "选择 Business",
+                  cta: "Select Business",
                 },
               ].map((plan) => (
                 <div
@@ -555,7 +555,7 @@ export default function Home() {
                 >
                   {plan.highlight && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-xs font-medium px-3 py-1 rounded-full">
-                      推荐
+                      Recommended
                     </div>
                   )}
                   <div className="text-center mb-4">
@@ -571,7 +571,7 @@ export default function Home() {
                   <div className="text-center mb-4">
                     <div className="inline-flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1">
                       <span className="text-lg">💰</span>
-                      <span className="font-semibold text-slate-700">{plan.credits} 积分/月</span>
+                      <span className="font-semibold text-slate-700">{plan.credits} Credits/mo</span>
                     </div>
                   </div>
 
@@ -610,28 +610,28 @@ export default function Home() {
                 onClick={() => setShowUpgradeModal(false)}
                 className="text-slate-500 hover:text-slate-700 text-sm py-2"
               >
-                稍后再说
+                Maybe Later
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 购买积分弹窗 */}
+      {/* Buy Credits弹窗 */}
       {showBuyModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
             <div className="text-center mb-6">
               <div className="text-4xl mb-3">💰</div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">购买积分</h2>
-              <p className="text-slate-600 text-sm">选择积分包进行充值（PayPal 支付）</p>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Buy Credits</h2>
+              <p className="text-slate-600 text-sm">SelectCredits进行充值（PayPal 支付）</p>
             </div>
 
             {buySuccess ? (
               <div className="text-center py-6">
                 <div className="text-5xl mb-3">✅</div>
-                <h3 className="text-xl font-bold text-green-600 mb-2">购买成功！</h3>
-                <p className="text-slate-600">积分已添加到您的账户</p>
+                <h3 className="text-xl font-bold text-green-600 mb-2">Purchase Successful！</h3>
+                <p className="text-slate-600">Creditshas been added to your account</p>
               </div>
             ) : (
               <>
@@ -649,7 +649,7 @@ export default function Home() {
                     >
                       <div className="text-left">
                         <p className="font-semibold text-slate-800">{pkg.key}</p>
-                        <p className="text-sm text-slate-500">{pkg.credits} 积分</p>
+                        <p className="text-sm text-slate-500">{pkg.credits} Credits</p>
                       </div>
                       <div className="flex items-center gap-2">
                         {buyingPackage === pkg.key && buyLoading ? (
@@ -680,7 +680,7 @@ export default function Home() {
                   disabled={buyLoading}
                   className="w-full mt-2 text-slate-500 hover:text-slate-700 text-sm py-2 disabled:opacity-50"
                 >
-                  取消
+                  Cancel
                 </button>
               </>
             )}
@@ -719,7 +719,7 @@ export default function Home() {
                       href="/profile"
                       className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition"
                     >
-                      👤 个人中心
+                      👤 My Account
                     </a>
                   </div>
                 </div>
@@ -744,20 +744,20 @@ export default function Home() {
           </p>
         </div>
 
-        {/* 积分显示条 */}
+        {/* CreditsShow条 */}
         {authenticated && user && (
           <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-slate-600">剩余积分</span>
+              <span className="text-sm font-medium text-slate-600">Remaining Credits</span>
               <div className="flex items-center gap-3">
                 <span className="text-sm font-bold text-blue-600">
-                  {user.credits_remaining} 次
+                  {user.credits_remaining} times
                 </span>
                 <button
                   onClick={() => setShowBuyModal(true)}
                   className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg transition font-medium"
                 >
-                  购买积分
+                  Buy Credits
                 </button>
               </div>
             </div>
@@ -768,10 +768,10 @@ export default function Home() {
               />
             </div>
             <div className="flex justify-between text-xs text-slate-400 mt-1">
-              <span>本月已用 {user.monthly_used} 次</span>
+              <span>Used {user.monthly_used} times</span>
               <span>
-                {user.monthly_credits > 0 ? `月额度 ${user.monthly_remaining} 次` : ""}
-                {user.package_remaining > 0 ? ` + 积分包 ${user.package_remaining} 次` : ""}
+                {user.monthly_credits > 0 ? `/moAllowance ${user.monthly_remaining} times` : ""}
+                {user.package_remaining > 0 ? ` + Credits ${user.package_remaining} times` : ""}
               </span>
             </div>
           </div>
@@ -779,7 +779,7 @@ export default function Home() {
 
         {!authenticated && (
           <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-            请登录后使用.generator（注册即送 3 次免费生成）
+            Please login to use.generator（Register and get 3 free generations）
           </div>
         )}
 
@@ -868,9 +868,9 @@ export default function Home() {
                 />
               </div>
 
-              {/* 模板选择 */}
+              {/* 模板Select */}
               <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 mb-4">
-                <h3 className="text-sm font-medium text-slate-700 mb-3">🎨 生成模板</h3>
+                <h3 className="text-sm font-medium text-slate-700 mb-3">🎨 Generate</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {categories.map((cat) => (
                     <button
@@ -937,8 +937,8 @@ export default function Home() {
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                   >
                     <option value="english">English</option>
-                    <option value="chinese">中文</option>
-                    <option value="japanese">日本語</option>
+                    <option value="chinese">CN</option>
+                    <option value="japanese">Japanese</option>
                     <option value="korean">한국어</option>
                   </select>
                 </div>
@@ -972,7 +972,7 @@ export default function Home() {
                     Generating...
                   </>
                 ) : (user?.credits_remaining ?? 0) <= 0 ? (
-                  "积分已用完"
+                  "Out of Credits"
                 ) : (
                   <>✨ Generate Listing</>
                 )}
@@ -1100,7 +1100,7 @@ export default function Home() {
 
         {/* Footer */}
         <div className="mt-12 text-center text-sm text-slate-500">
-          <p>注册即送 3 次免费生成 · 升级 Pro 解锁更多</p>
+          <p>Register and get 3 free generations · Upgrade Pro Unlock More</p>
         </div>
       </div>
     </div>
